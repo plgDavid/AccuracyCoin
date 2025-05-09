@@ -61,8 +61,7 @@ PowerOn_A = $370
 PowerOn_X = $371
 PowerOn_Y = $372
 PowerOn_SP = $373
-PowerOn_S = $374
-
+PowerOn_P = $374
 
 result_CPUInstr = $0401
 result_UnofficialInstr = $0402
@@ -72,6 +71,13 @@ result_ROMnotWritable = $0405
 result_DummyReads = $0406
 result_DummyWrites = $0407
 result_OpenBus = $0408
+
+result_PowOn_CPURAM = $0410
+result_PowOn_CPUReg = $0411
+result_PowOn_PPURAM = $0412
+result_PowOn_PPUPal = $0413
+result_PowOn_PPUReset = $0414
+
 
 ;$500 is dedicated to RAM needed for tests.
 
@@ -100,17 +106,21 @@ RESET:
 	PHP
 	PLA
 	AND #$CF
-	STA PowerOn_S
+	STA PowerOn_P
+RESET_SkipPowerOnTests
 
 	SEI
 	CLD
 	LDX #$FF
 	TXS
+TEST_PPUResetFlag:
+	;;; Test 1 [PPU Reset Flag]: Are PPU Registers writable before the first pre-render line? ;;;
+	; They shouldn't be, as that's the job of the PPU Reset Flag!
 	; Let's see if the PPU Reset flag exists.
 	LDA #$27
 	STA $2006 ; "magic address"
 	LDA #$BF
-	STA $2006
+	STA $2006 ; PPUADDR = $27BF
 	LDA #$5A ; "magic number"
 	STA $2007
 	; Okay, I'll be back in 2 frames to check on you...
@@ -124,7 +134,9 @@ VblLoop:
 	JSR Read32NametableBytes
 	JSR ReadPaletteRAM
 	
-	; Let's also see if the magic number was written, or if the reset flag exists.
+	; Let's also see if the magic number was written, to verify if the reset flag exists.
+	LDA #$6
+	STA PowerOnTest_PPUReset ; set to FAIL (error code $1) by default. Overwrite with PASS if it passes.
 	LDA #$27
 	STA $2006
 	LDA #$BF
@@ -132,10 +144,12 @@ VblLoop:
 	LDA $2007 ; load buffer
 	LDA $2007 ; read buffer
 	CMP #$5A
-	BEQ FailedResetFlagTest
+	BEQ PostResetFlagTest
+	; The value of $5A was not written to VRAM, so the reset flag does exist!
 	LDA #1
-	STA PowerOnTest_PPUReset
-FailedResetFlagTest:
+	STA PowerOnTest_PPUReset ; Store a passing result here.
+	;; End of test ;;
+PostResetFlagTest:
 	
 	; With those values copied for future reference, let's overwrite the nametable.
 	JSR SetUpDefaultPalette
@@ -249,10 +263,11 @@ Suite_DMATests:
 	;; Power On State ;;
 Suite_PowerOnState:
 	.byte "Power On State", $FF
-	table "CPU RAM", $FF, $0100, DebugTest
-	table "CPU Registers", $FF, $0100, DebugTest
-	table "PPU RAM", $FF, $0100, DebugTest
-	table "PPU Reset Flag", $FF, $0100, DebugTest
+	table "CPU RAM", $FF, result_PowOn_CPURAM, TEST_PowerOnState_CPU_RAM
+	table "CPU Registers", $FF, result_PowOn_CPUReg, TEST_PowerOnState_CPU_Registers
+	table "PPU RAM", $FF, result_PowOn_PPURAM, TEST_PowerOnState_PPU_RAM
+	table "Palette RAM", $FF, result_PowOn_PPUPal, TEST_PowerOnState_PPU_Palette
+	table "PPU Reset Flag", $FF, result_PowOn_PPUReset, TEST_PowerOnState_PPU_ResetFlag
 	.byte $FF
 	
 	;; PPU Stuff ;;
@@ -680,14 +695,14 @@ TEST_DummyReads:
 	BMI TEST_Fail3
 	INC <currentSubTest 
 	
-	;;; Test A [Dummy Read Cycles]: LDA ($2002,X) does not dummy-read $2002
+	;;; Test A [Dummy Read Cycles]: LDA ($2002,X) does not dummy-read $2002 ;;;
 	LDX #0
 	JSR Clockslide_29750 ; Wait (slightly less than) a frame so the VBlank flag gets set
 	LDA [$50,X]
 	BPL TEST_Fail3 ; If bit 7 of A is set, then we pass the test. The dummy read was at $0050, which we can't test for.
 	INC <currentSubTest 	
 	
-	;;; Test B [Dummy Read Cycles]: STA ($2002,X) does not dummy-read $2002
+	;;; Test B [Dummy Read Cycles]: STA ($2002,X) does not dummy-read $2002 ;;;
 	LDX #0
 	JSR Clockslide_29780 ; Wait  a frame so the VBlank flag gets set
 	STA [$50,X]
@@ -731,7 +746,7 @@ TEST_DummyWrites:
 	BNE TEST_Fail3
 	INC <currentSubTest 
 	
-	;;; Test 2 [Dummy Write Cycles]: Read-Modify-Write instruction perform dummy reads.
+	;;; Test 2 [Dummy Write Cycles]: Read-Modify-Write instruction perform dummy reads. ;;;
 	; Consider the ASL instruction.
 	; This is a "Read-Modify-Write" instruction, for it does the following:
 	; Read target address, modify the value, and write it back.
@@ -753,7 +768,7 @@ TEST_DummyWrites:
 	BNE TEST_Fail3
 	INC <currentSubTest 
 	
-	;;; Test 2 [Dummy Write Cycles]: Check every official Read-Modify-Write opcode.
+	;;; Test 2 [Dummy Write Cycles]: Check every official Read-Modify-Write opcode. ;;;
 	; ASL, ROL, LSR, ROR, DEC, INC
 	; Absolute, Absolute+X
 	; 0E, 1E, 2E, 3E, 4E, 5E, 6E, 7E, CE, DE, EE, FE
@@ -789,10 +804,108 @@ TEST_DummyWrites_Test2SkipLDY:
 	LDA #01
 	RTS
 ;;;;;;;
-	
+
+TEST_PowerOnState_CPU_RAM:
+	;;; Test 1 [CPU RAM Power On State]: Print the values recorded at power on ;;;
+	JSR ClearNametableFrom2240
+	JSR ResetScroll
+	JSR WaitForVBlank
+	JSR Print32Bytes
+	.word $2244
+	.word PowerOnRAM
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;	
+
+TEST_PowerOnState_PPU_RAM:
+	;;; Test 1 [PPU RAM Power On State]: Print the values recorded at power on ;;;
+	JSR ClearNametableFrom2240
+	JSR ResetScroll
+	JSR WaitForVBlank
+	JSR Print32Bytes
+	.word $2244
+	.word PowerOnVRAM
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;	
+
+TEST_PowerOnState_PPU_Palette:
+	;;; Test 1 [Palette RAM Power On State]: Print the values recorded at power on ;;;
+	JSR ClearNametableFrom2240
+	JSR ResetScroll
+	JSR WaitForVBlank
+	JSR Print32Bytes
+	.word $2244
+	.word PowerOnPalette
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;	
+
+TEST_PowerOnState_PPU_ResetFlag:
+	;;; Test 1 [PPU Reset Flag]: Print the value recorded at power on ;;;
+	JSR ClearNametableFrom2240
+	JSR ResetScroll
+	JSR WaitForVBlank
+	LDA PowerOnTest_PPUReset
+	;; END OF TEST ;;
+	RTS
 ;;;;;;;
+
+TEST_PowerOnState_CPU_Registers:
+	;;; Test 1 [CPU Registers Power On State]: Print the values recorded at power on ;;;
+	JSR ClearNametableFrom2240
+	JSR ResetScroll
+	JSR WaitForVBlank
+	LDA #0
+	STA <dontSetPointer
 	
+	JSR PrintText
+	.word $2252
+	.byte "A ", $FF
+	LDA PowerOn_A
+	JSR PrintByte
 	
+	JSR PrintText
+	.word $2272
+	.byte "X ", $FF
+	LDA PowerOn_X
+	JSR PrintByte
+	
+	JSR PrintText
+	.word $2292
+	.byte "Y ", $FF
+	LDA PowerOn_Y
+	JSR PrintByte
+
+	JSR ResetScroll
+	JSR WaitForVBlank
+
+	JSR PrintText
+	.word $22A6
+	.byte "Stack Pointer ", $FF
+	LDA PowerOn_SP
+	JSR PrintByte
+	
+	JSR PrintText
+	.word $22C4
+	.byte "Processor flags ", $FF
+	LDA PowerOn_P
+	JSR PrintByte
+	;; END OF TEST ;;
+	LDA #1
+	STA <dontSetPointer
+	RTS
+;;;;;;;
+
+
+
+
+
+
+
 	
 	.bank 3
 	.org $F000
@@ -1664,6 +1777,7 @@ RunTest:
 	                              ; The A Register holds the results of the test.
 	LDY #0
 	STA [TestResultPointer],Y     ; store the test results in RAM.
+	JSR ResetScroll				  ; Some tests might update the scroll and not change it back, so let's do this here.
 	JSR WaitForVBlank		      ; and wait for VBlank before updating the "...." text with the results.
 	LDX <menuCursorYPos		      ; load X for the upcoming subroutines.
 	JSR DrawTEST			      ; draw "PASS" or "FAIL x"
@@ -1819,6 +1933,33 @@ Clockslide_29780:		;=6
 	RTS					;=29780
 ;;;;;;;
 
+ClearNametableFrom2240:
+	LDA #$22
+	STA $2006
+	LDA #$40
+	STA $2006
+	LDX #0
+	LDA #$24
+ClearNTFrom2240Loop:
+	STA $2007
+	DEX
+	BNE ClearNTFrom2240Loop
+	RTS
+;;;;;;;
+
+PrintByte:
+	PHA
+	AND #$F0
+	LSR A
+	LSR A
+	LSR A
+	LSR A
+	STA $2007
+	PLA
+	AND #$0F
+	STA $2007
+	RTS
+;;;;;;;
 
 
 	.bank 3
