@@ -1060,7 +1060,7 @@ TEST_UnofficialInstructionsExist:
 	;	   = $0D & $15 & $1F
 	;	   = 5
 	; H is the high byte of the target address +1.
-	; So we should write $04 to $0500
+	; So we should write $05 to $0500
 	LDA $0500
 	CMP #$05
 	BNE TEST_Fail5
@@ -1139,8 +1139,33 @@ TEST_UnofficialInstructions_TAS_Continue:
 	BNE TEST_Fail5
 	; TAS exists!
 	INC <currentSubTest
+	
+	;;; Test H [Unofficial Instructions Exist]: Does AHX ($zp), Y exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	; Test the unstable part too, why not.
+	LDA #$80
+	STA <$50
+	LDA #$1E
+	STA <$51 ; ($51) = $1E80
+	LDA #$0D
+	LDX #$15
+	LDY #$80
+	.byte $93, $50 ; SAX ($50) -> $1E80
+	; This goes unstable, so the high byte of the target address will be changed.
+	; Hi = ($1E+1) & A & X;
+	; 	 = $05
+	; $500 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	; H is the high byte of the target address +1.
+	; So we should write $05 to $0500
+	LDA $0500
+	CMP #$05
+	BNE TEST_Fail5
+	; AHX ($zp), Y exists!
+	INC <currentSubTest
 
-	;;; Test H [Unofficial Instructions Exist]: Does LAX exist? ;;;
+	;;; Test I [Unofficial Instructions Exist]: Does LAX exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	.byte $AF ; LAX $0500
 	.word $0500
@@ -1152,7 +1177,7 @@ TEST_UnofficialInstructions_TAS_Continue:
 	; LAX exists!
 	INC <currentSubTest
 	
-	;;; Test I [Unofficial Instructions Exist]: Does LXA exist? ;;;
+	;;; Test J [Unofficial Instructions Exist]: Does LXA exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	LDA #$1F 
 	LDX #$F0
@@ -1166,7 +1191,7 @@ TEST_UnofficialInstructions_TAS_Continue:
 	; LXA exists!
 	INC <currentSubTest
 	
-	;;; Test J [Unofficial Instructions Exist]: Does LAE exist? ;;;
+	;;; Test K [Unofficial Instructions Exist]: Does LAE exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	; This also destroys the stack pointer, so...
 	TSX
@@ -1196,7 +1221,7 @@ TEST_UnofficialInst_2:
 	; LAE TEST_Fail6!
 	INC <currentSubTest
 	
-	;;; Test K [Unofficial Instructions Exist]: Does DCP exist? ;;;
+	;;; Test L [Unofficial Instructions Exist]: Does DCP exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	LDA #$41
 	.byte $CF	; DCP $0500
@@ -1205,7 +1230,7 @@ TEST_UnofficialInst_2:
 	; LAE exists!
 	INC <currentSubTest
 	
-	;;; Test L [Unofficial Instructions Exist]: Does AXS exist? ;;;
+	;;; Test M [Unofficial Instructions Exist]: Does AXS exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	LDA #$F0
 	LDX #$66
@@ -1216,7 +1241,7 @@ TEST_UnofficialInst_2:
 	; AXS exists!
 	INC <currentSubTest
 	
-	;;; Test M [Unofficial Instructions Exist]: Does ISC exist? ;;;
+	;;; Test N [Unofficial Instructions Exist]: Does ISC exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	LDA #$22
 	.byte $EF	; ISC $0500
@@ -1229,6 +1254,10 @@ TEST_UnofficialInst_2:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
+
+	
+	
+	
 TEST_Fail6:	; This is in the middle of the test, since it saves bytes to branch here.
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
