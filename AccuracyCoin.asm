@@ -124,7 +124,7 @@ TEST_PPUResetFlag:
 	LDA #$5A ; "magic number"
 	STA $2007
 	; Okay, I'll be back in 2 frames to check on you...
-	
+	LDA $2002
 VblLoop:
 	LDA $2002
 	BPL VblLoop
@@ -159,12 +159,7 @@ PostResetFlagTest:
 	STA $4014 ; Set up OAM
 	
 	; set up the NMI routine.
-	LDA #$4C
-	STA $700
-	LDA #Low(NMI_Routine)
-	STA $701
-	LDA #High(NMI_Routine)
-	STA $702
+	JSR SetUpNMIRoutineForMainMenu
 	
 	LDA #$20
 	STA <JSRFromRAM
@@ -229,10 +224,11 @@ EndTableTable:
 Suite_CPUBehavior:
 	.byte "CPU Behavior", $FF
 	table "CPU Instructions", $FF, result_CPUInstr, DebugTest
-	table "Unofficial Instructions", $FF, result_UnofficialInstr, DebugTest
+	table "Unofficial Instructions", $FF, result_UnofficialInstr, TEST_UnofficialInstructionsExist
 	table "ROM is not writable", $FF, result_ROMnotWritable, TEST_ROMnotWritable
 	table "RAM Mirroring", $FF, result_RAMMirror, TEST_RamMirroring
 	table "PPU Register Mirroring", $FF, result_PPURegMirror, TEST_PPURegMirroring
+	table "$FFFF + X Wraparound", $FF, $0100, DebugTest
 	table "Dummy read cycles", $FF, result_DummyReads, TEST_DummyReads
 	table "Dummy write cycles", $FF, result_DummyWrites, TEST_DummyWrites
 	table "Open Bus", $FF, result_OpenBus, TEST_OpenBus
@@ -900,12 +896,344 @@ TEST_PowerOnState_CPU_Registers:
 	RTS
 ;;;;;;;
 
+TEST_Fail4:
+	JMP TEST_Fail
+TEST_UnofficialInstructions_Prep:
+	LDA #$42
+	STA $500
+	STA <$50
+	LDA #0
+	TAX
+	TAY
+	RTS
+TEST_UnofficialInstructionsExist:
+	;;; Test 1 [Unofficial Instructions Exist]: What happens when we run an unofficial opcode? ;;;
+	; This test does NOT verify accurate emulation of every oen of these instructions.
+	; It just makes sure they all vaguely perform what's expected of them, instead of NOP
+	; let's run a 3-byte NOP, and check if it was actually 3 bytes.
+	LDA #0
+	LDX #0
+	LDY #$0F
+	; The following should be: NOP $98A2	
+	.byte $0C, $A2, $98
+	; But if this was treated as a 1-byte NOP, X=98
+	CPX #$98
+	BEQ TEST_Fail4
+	INC <currentSubTest 
+	
+	;;; Test 2 [Unofficial Instructions Exist]: Was it a 2-byte nop? ;;;
+	; And if this was treated as a 2-byte NOP, A=0F
+	CMP #$0F
+	BEQ TEST_Fail4
+	; Alright! It was treated as a 3-byte NOP, which is what it should be.
+	INC <currentSubTest 
+	
+	;;; Test 3 [Unofficial Instructions Exist]: NOP Absolute updates PPUSTATUS ;;;
+	JSR Clockslide_29780 ; wait for next frame.
+	.byte $0C, $02, $20 ; NOP $2002
+	LDA $2002
+	BMI TEST_Fail4 ; if bit 7 was still set after that NOP $2002, that's a fail!
+	INC <currentSubTest 
+	
+	;;; Test 4 [Unofficial Instructions Exist]: Does SLO exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$0F
+	.byte $0F ; SLO Absolute
+	.word $0500; $SLO $0500
+	; A |= ($42 << 1) -> $8F
+	CMP #$8F
+	BNE TEST_Fail4
+	LDA $0500
+	CMP #$84
+	BNE TEST_Fail4
+	; SLO exists!
+	INC <currentSubTest 
 
+	;;; Test 5 [Unofficial Instructions Exist]: Does ANC exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$8F
+	CLC
+	.byte $0B, $8C ; ANC #$8C
+	; A &= $8C -> $8C
+	BCC TEST_Fail4
+	CMP #$8C
+	BNE TEST_Fail4
+	; ANC exists!
+	INC <currentSubTest
+	
+	;;; Test 6 [Unofficial Instructions Exist]: Does RLA exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$F1
+	SEC
+	.byte $2F ; RLA Absolute
+	.word $0500; $RLA $0500
+	; A &= (($42 << 1) | Carry) -> $81
+	CMP #$81
+	BNE TEST_Fail4
+	LDA $0500
+	CMP #$85
+	BNE TEST_Fail4
+	; RLA exists!
+	INC <currentSubTest 
+	
+	;;; Test 7 [Unofficial Instructions Exist]: Does SRE exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$FF
+	SEC
+	.byte $4F ; SRE Absolute
+	.word $0500; $SRE $0500
+	; A ^= ($42 >> 1) -> $DE
+	CMP #$DE
+	BNE TEST_Fail4	
+	; SRE exists!
+	INC <currentSubTest 
+	
+	;;; Test 8 [Unofficial Instructions Exist]: Does ASR exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$F0
+	.byte $4B, $42 ; ASR #$42
+	; A = (A & $42) >> 1 = $20
+	CMP #$20
+	BNE TEST_Fail5	
+	; ASR exists!
+	INC <currentSubTest
+	
+	;;; Test 9 [Unofficial Instructions Exist]: Does RRA exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$20
+	SEC
+	.byte $6F ; RRA Absolute
+	.word $0500; $RRA $0500
+	; A += ($42 >> 1) | $80*Carry = $C1
+	CMP #$C1
+	BNE TEST_Fail5	
+	; RRA exists!
+	INC <currentSubTest 
+	
+	;;; Test A [Unofficial Instructions Exist]: Does ARR exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$F0
+	SEC
+	.byte $6B, $42 ; ARR #$42
+	; A = ((A & $42) >> 1) | $80*Carry = $A0
+	CMP #$A0
+	BNE TEST_Fail5		
+	; ARR exists!
+	INC <currentSubTest
+	
+	;;; Test B [Unofficial Instructions Exist]: Does SAX exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$F0
+	LDX #$2F
+	.byte $8F ; SAX $0500
+	.word $0500
+	;$500 = (A&X)
+	LDA $0500
+	CMP #$20
+	BNE TEST_Fail5
+	; SAX exists!
+	INC <currentSubTest
+	
+	;;; Test C [Unofficial Instructions Exist]: Does XAA exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$FF
+	LDX #$F0
+	.byte $8B, $30 ; XAA #$30
+	; Due to the way this instruction varies on different CPUs, let's just confirm A is no longer $FF
+	CMP #$FF
+	BEQ TEST_Fail5	
+	; XAA exists!
+	INC <currentSubTest
+	
+	;;; Test D [Unofficial Instructions Exist]: Does AHX exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	; Test the unstable part too, why not.
+	LDA #$0D
+	LDX #$15
+	LDY #$80
+	.byte $9F ; SAX $0500
+	.word $1E80 ; Use a mirror
+	; This goes unstable, so the high byte of the target address will be changed.
+	; Hi = ($1E+1) & A & X;
+	; 	 = $05
+	; $500 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	; H is the high byte of the target address +1.
+	; So we should write $04 to $0500
+	LDA $0500
+	CMP #$05
+	BNE TEST_Fail5
+	; AHX exists!
+	INC <currentSubTest
+	
+	;;; Test E [Unofficial Instructions Exist]: Does SHX exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$00
+	LDX #$05
+	LDY #$80
+	.byte $9E ; SHX $0500
+	.word $1E80 ; Use a mirror
+	; This goes unstable, so the high byte of the target address will be changed.
+	; Hi = ($1E+1) & X;
+	; 	 = $05
+	; $500 = X & H
+	; H is the high byte of the target address +1.
+	; So we should write $05 to $0500
+	LDA $0500
+	CMP #$05
+	BNE TEST_Fail5
+	; SHX exists!
+	INC <currentSubTest
+	
+	JMP TEST_UnofficialInstructions_Continue
+TEST_Fail5:	; This is in the middle of the test, since it saves bytes to branch here.
+	JMP TEST_Fail
+TEST_UnofficialInstructions_Continue:
 
+	;;; Test F [Unofficial Instructions Exist]: Does SHY exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$00
+	LDX #$80
+	LDY #$05
+	.byte $9C ; SHY $0500
+	.word $1E80 ; Use a mirror
+	; This goes unstable, so the high byte of the target address will be changed.
+	; Hi = ($1E+1) & Y;
+	; 	 = $05
+	; $500 = Y & H
+	; H is the high byte of the target address +1.
+	; So we should write $05 to $0500
+	LDA $0500
+	CMP #$05
+	BNE TEST_Fail5
+	; SHY exists!
+	INC <currentSubTest
+	
+	;;; Test G [Unofficial Instructions Exist]: Does TAS exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	TSX
+	STX $501
+	LDA #$0D
+	LDX #$15
+	LDY #$80
+	.byte $9B ; TAS $0500
+	.word $1E80 ; Use a mirror
+	; This goes unstable, so the high byte of the target address will be changed.
+	; Hi = ($1E+1) & A & X;
+	; 	 = $05
+	; $500 = X & H
+	; H is the high byte of the target address before adding the Y offset.
+	; So we should write $05 to $0500
+	; Before we check $0500, this instruction just destroyed the stack pointer.
+	TSX
+	CPX $0501
+	BNE TEST_UnofficialInstructions_TAS_Continue
+	; The stack pointer was unchanged?!
+	JMP TEST_Fail
+TEST_UnofficialInstructions_TAS_Continue:
+	LDX $501
+	TXS ; Fix the stack pointer.
+	LDA $0500
+	CMP #$05 ; See if this was the right value too.
+	BNE TEST_Fail5
+	; TAS exists!
+	INC <currentSubTest
 
-
-
-
+	;;; Test H [Unofficial Instructions Exist]: Does LAX exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	.byte $AF ; LAX $0500
+	.word $0500
+	;A = $0500; X = $0500
+	CMP $0500
+	BNE TEST_Fail5
+	CPX $0500
+	BNE TEST_Fail5
+	; LAX exists!
+	INC <currentSubTest
+	
+	;;; Test I [Unofficial Instructions Exist]: Does LXA exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$1F 
+	LDX #$F0
+	.byte $AB, $30 ; LXA #$30
+	; A = (A|MAGIC) & $30; X = A;
+	; another one where we'll just check to see if these changed at all.
+	CMP #$1F
+	BEQ TEST_Fail5
+	CPX #$F0
+	BEQ TEST_Fail5
+	; LXA exists!
+	INC <currentSubTest
+	
+	;;; Test J [Unofficial Instructions Exist]: Does LAE exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	; This also destroys the stack pointer, so...
+	TSX
+	STX $501
+	LDA #$33
+	STA $500
+	; The stack pointer *should* be $F6
+	.byte $BB ; LAE $500
+	.word $0500 
+	; A = StackPointer & Immediate
+	; And then transfer A to X and StackPointer.
+	; So let's fix the stakc pointer first.
+	TSX
+	CPX $0501
+	BNE TEST_UnofficialInst_2
+	; The stack pointer was unchanged?!
+	JMP TEST_Fail
+TEST_UnofficialInst_2:
+	STX <$FD
+	LDX $501
+	TXS	; Fix the stack pointer
+	CMP #$32
+	BNE TEST_Fail6
+	LDX <$FD
+	CPX #$32
+	BNE TEST_Fail6
+	; LAE TEST_Fail6!
+	INC <currentSubTest
+	
+	;;; Test K [Unofficial Instructions Exist]: Does DCP exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$41
+	.byte $CF	; DCP $0500
+	.word $0500
+	BNE TEST_Fail6	
+	; LAE exists!
+	INC <currentSubTest
+	
+	;;; Test L [Unofficial Instructions Exist]: Does AXS exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$F0
+	LDX #$66
+	.byte $CB, $40; AXS #$40
+	; X = (A&X)-M
+	CPX #$20
+	BNE TEST_Fail6	
+	; AXS exists!
+	INC <currentSubTest
+	
+	;;; Test M [Unofficial Instructions Exist]: Does ISC exist? ;;;
+	JSR TEST_UnofficialInstructions_Prep
+	LDA #$22
+	.byte $EF	; ISC $0500
+	.word $0500
+	; Increment $0500, then subtract it from A
+	CMP #$DF
+	BNE TEST_Fail6	
+	; LAE exists!
+	INC <currentSubTest
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+TEST_Fail6:	; This is in the middle of the test, since it saves bytes to branch here.
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+	
+	
 	
 	.bank 3
 	.org $F000
@@ -1783,6 +2111,7 @@ RunTest:
 	JSR DrawTEST			      ; draw "PASS" or "FAIL x"
 	JSR UpdateTESTAttributes      ; and update the colors for that text.
 	JSR HighlightTest		      ; and also highlight it, as the cursor is still there.
+	JSR SetUpNMIRoutineForMainMenu; Recreate the NMI routine JMP, since some tests need their own NMI routine.
 	JSR EnableNMI			      ; With the test over, re-enable the NMI
 	JSR EnableRendering		      ; and enable rendering too. This should still occur during Vblank.
 	LDY <$FE				      ; Restore the Y register
@@ -1958,6 +2287,16 @@ PrintByte:
 	PLA
 	AND #$0F
 	STA $2007
+	RTS
+;;;;;;;
+
+SetUpNMIRoutineForMainMenu:
+	LDA #$4C
+	STA $700
+	LDA #Low(NMI_Routine)
+	STA $701
+	LDA #High(NMI_Routine)
+	STA $702
 	RTS
 ;;;;;;;
 
