@@ -174,7 +174,12 @@ result_UnOp_ISC_F7 = $443
 result_UnOp_ISC_FB = $444
 result_UnOp_ISC_FF = $445
 
-
+result_UnOp_SHA_93 = $446
+result_UnOp_SHA_9F = $447
+result_UnOp_SHS_9B = $448
+result_UnOp_SHY_9C = $449
+result_UnOp_SHX_9E = $44A
+result_UnOp_LAE_BB = $44B
 
 
 result_PowOn_CPURAM = $0480
@@ -332,6 +337,7 @@ TableTable:
 	.word Suite_UnofficialOps__AX
 	.word Suite_UnofficialOps_DCP
 	.word Suite_UnofficialOps_ISC
+	.word Suite_UnofficialOps_SH_
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
@@ -441,6 +447,17 @@ Suite_UnofficialOps_ISC:
 	table "$F7   ISC zeropage,X", $FF, result_UnOp_ISC_F7, TEST_ISC_F7
 	table "$FB   ISC absolute,Y", $FF, result_UnOp_ISC_FB, TEST_ISC_FB
 	table "$FF   ISC absolute,X", $FF, result_UnOp_ISC_FF, TEST_ISC_FF
+	.byte $FF
+	
+	;; Unofficial Instructions: SH_ ;;
+Suite_UnofficialOps_SH_:
+	.byte "Unofficial Instructions: SH*", $FF
+	table "$93   SHA indirect,Y", $FF, result_UnOp_SHA_93, TEST_SHA_93
+	table "$9F   SHA absolute,Y", $FF, result_UnOp_SHA_9F, TEST_SHA_9F
+	table "$9B   SHS absolute,Y", $FF, result_UnOp_SHS_9B, TEST_SHS_9B
+	table "$9C   SHY absolute,X", $FF, result_UnOp_SHY_9C, TEST_SHY_9C
+	table "$9E   SHX absolute,Y", $FF, result_UnOp_SHX_9E, TEST_SHX_9E
+	table "$BB   LAE absolute,Y", $FF, result_UnOp_LAE_BB, TEST_LAE_BB
 	.byte $FF
 	
 	;; Unofficial Instructions: The Immediate group ;;
@@ -1422,7 +1439,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	; LXA exists!
 	INC <currentSubTest
 	
-	;;; Test K [Unofficial Instructions Exist]: Does LAS exist? ;;;
+	;;; Test K [Unofficial Instructions Exist]: Does LAE exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	; This also destroys the stack pointer, so...
 	TSX
@@ -1430,7 +1447,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	LDA #$33
 	STA $500
 	; The stack pointer *should* be $F6
-	.byte $BB ; LAS $500
+	.byte $BB ; LAE $500
 	.word $0500 
 	; A = StackPointer & Immediate
 	; And then transfer A to X and StackPointer.
@@ -1449,7 +1466,7 @@ TEST_UnofficialInst_2:
 	LDX <$FD
 	CPX #$32
 	BNE TEST_Fail6
-	; LAE TEST_Fail6!
+	; LAE exists!
 	INC <currentSubTest
 	
 	;;; Test L [Unofficial Instructions Exist]: Does DCP exist? ;;;
@@ -1458,7 +1475,7 @@ TEST_UnofficialInst_2:
 	.byte $CF	; DCP $0500
 	.word $0500
 	BNE TEST_Fail6	
-	; LAE exists!
+	; DCP exists!
 	INC <currentSubTest
 	
 	;;; Test M [Unofficial Instructions Exist]: Does AXS exist? ;;;
@@ -2376,6 +2393,82 @@ TEST_ISC:
 	LDA #1
 	RTS
 ;;;;;;;
+
+
+TEST_SHA_93:
+	LDA #$93
+	BNE TEST_SHA
+TEST_SHA_9F:
+	LDA #$9F
+TEST_SHA:
+	JSR TEST_UnOp_Setup; Set the opcode
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0525
+	.byte $FF
+	.byte $FF, $FF, $00, (flag_i)
+	.word $0525
+	.byte $06
+	.byte $FF, $FF, $00, (flag_i)
+	; SHA ;
+	; This test needs to be VERY carefully made
+	; the high byte of the target address can be modified "unexpectedly"
+	; let's run some tests where the high byte doesn't change.
+	; Store (A & X & H), where "H" is the high byte of the target address + 1.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1D00	; If someone is testing for this instruction, they would surely have RAM mirroring implemented.
+	.byte $FF
+	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v)
+	.word $0500
+	.byte $14
+	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v)
+	
+	; Now to make the high byte go unstable.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1F10 ; $1E90 will be the operand.
+	.byte $FF
+	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v)
+	.word $0510
+	.byte $05
+	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v)
+	; Hi = ($1E+1) & A & X;
+	; 	 = $05
+	; $510 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	INC <$55 ; make this non-zero for the test.	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0555 ; $0402 will be the operand.
+	.byte $FF
+	.byte $F0, $09, $FF, (flag_i)
+	.word $0055
+	.byte $00
+	.byte $F0, $09, $FF, (flag_i)
+	; Hi = ($1E+1) & A & X;
+	; 	 = $00
+	; $510 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	
+;; END OF TEST ;;
+	LDA #1
+	RTS
+
+
+TEST_SHS_9B:
+TEST_SHY_9C:
+TEST_SHX_9E:
+TEST_LAE_BB:
+	LDA #2
+	RTS
+;;;;;;;
+
+
+
+
+
+
+
+
 
 
 TEST_ANC_0B:
