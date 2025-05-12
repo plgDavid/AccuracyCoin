@@ -7,6 +7,15 @@
 	.inesmap 0  ; mapper 0 = NROM
 	.inesmir 1  ; background mirroring, vertical
 	;;;; CONSTANTS ;;;;	
+
+flag_c = $1
+flag_z = $2
+flag_i = $4
+flag_d = $8
+flag_v = $40
+flag_n = $80
+	
+	
 	
 byte0 = $0
 byte1 = $1
@@ -34,6 +43,26 @@ JSRFromRAM3 = $1D
 
 TestResultPointer = $1E
 
+Test_UnOp_OperandTargetAddrLo = $20
+Test_UnOp_OperandTargetAddrHi = $21
+Test_UnOp_ValueAtAddressForTest = $22
+Test_UnOp_A = $23
+Test_UnOp_X = $24
+Test_UnOp_Y = $25
+Test_UnOp_FlagsInit = $26
+Test_UnOp_SP = $27
+Test_UnOp_ExpectedResultAddrLo = $28
+Test_UnOp_ExpectedResultAddrHi = $29
+Test_UnOp_ValueAtAddressResult = $2A
+Test_UnOp_CMP = $2B
+Test_UnOp_CPX = $2C
+Test_UnOp_CPY = $2D
+Test_UnOp_CM_Flags = $2E
+Test_UnOp_CPS = $2F
+Test_UnOp_IndirectPointerLo = $30
+Test_UnOp_IndirectPointerHi = $31
+
+
 Test_ZeroPageReserved = $50 ; through $5F
 
 TESTHighlightTextCopy = $7A
@@ -48,9 +77,13 @@ suiteExecPointerList = $A0
 PPUCTRL_COPY = $F0
 PPUMASK_COPY = $F1
 
-byteFD = $FD
-byteFE = $FE
-byteFF = $FF
+
+Copy_SP = $FA
+Copy_SP2 = $FB
+Copy_Flags = $FC
+Copy_X = $FD
+Copy_Y = $FE
+Copy_A = $FF
 
 
 PowerOnRAM = $300
@@ -72,11 +105,26 @@ result_DummyReads = $0406
 result_DummyWrites = $0407
 result_OpenBus = $0408
 
-result_PowOn_CPURAM = $0410
-result_PowOn_CPUReg = $0411
-result_PowOn_PPURAM = $0412
-result_PowOn_PPUPal = $0413
-result_PowOn_PPUReset = $0414
+result_UnOp_SLO_03 = $409
+result_UnOp_SLO_07 = $40A
+result_UnOp_SLO_0F = $40B
+result_UnOp_SLO_13 = $40C
+result_UnOp_SLO_17 = $40D
+result_UnOp_SLO_1B = $40E
+result_UnOp_SLO_1F = $40F
+
+
+result_PowOn_CPURAM = $0480
+result_PowOn_CPUReg = $0481
+result_PowOn_PPURAM = $0482
+result_PowOn_PPUPal = $0483
+result_PowOn_PPUReset = $0484
+
+
+
+;TEST_Unofficial_Operand = $580+(TEST_UnOp_RAMFunctionTest-TEST_UnOp_RAMFunction)+1
+;TEST_Unofficial_Operand2 = $580+(TEST_UnOp_RAMFunctionTest-TEST_UnOp_RAMFunction)+2
+
 
 
 ;$500 is dedicated to RAM needed for tests.
@@ -211,6 +259,7 @@ table .macro
 
 TableTable:
 	.word Suite_CPUBehavior
+	.word Suite_UnofficialOps_SLO
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
 	.word Suite_PowerOnState
@@ -233,6 +282,20 @@ Suite_CPUBehavior:
 	table "Dummy write cycles", $FF, result_DummyWrites, TEST_DummyWrites
 	table "Open Bus", $FF, result_OpenBus, TEST_OpenBus
 	.byte $FF
+	
+		;; Unofficial Instructions: SLO ;;
+Suite_UnofficialOps_SLO:
+	.byte "Unofficial Instructions: SLO", $FF
+	table "$03   SLO indirect,X", $FF, result_UnOp_SLO_03, TEST_SLO_03
+	table "$07   SLO zeropage",   $FF, result_UnOp_SLO_07, TEST_SLO_07
+	table "$0F   SLO absolute",   $FF, result_UnOp_SLO_0F, TEST_SLO_0F
+	table "$13   SLO indirect,Y", $FF, result_UnOp_SLO_13, TEST_SLO_13
+	table "$17   SLO zeropage,X", $FF, result_UnOp_SLO_17, TEST_SLO_17
+	table "$1B   SLO absolute,Y", $FF, result_UnOp_SLO_1B, TEST_SLO_1B
+	table "$1F   SLO absolute,X", $FF, result_UnOp_SLO_1F, TEST_SLO_1F
+	.byte $FF
+	
+	
 	
 	;; CPU Interrupts ;;
 Suite_CPUInterrupts:
@@ -908,8 +971,9 @@ TEST_UnofficialInstructions_Prep:
 	RTS
 TEST_UnofficialInstructionsExist:
 	;;; Test 1 [Unofficial Instructions Exist]: What happens when we run an unofficial opcode? ;;;
-	; This test does NOT verify accurate emulation of every oen of these instructions.
-	; It just makes sure they all vaguely perform what's expected of them, instead of NOP
+	; This test does NOT verify accurate emulation of every one of these instructions.
+	; It just makes sure they all vaguely perform what's expected of them, instead of NOP.
+	; For instructions with many different addressing modes, This only checks the Immediate mode if it exists, or Absolute.
 	; let's run a 3-byte NOP, and check if it was actually 3 bytes.
 	LDA #0
 	LDX #0
@@ -1016,6 +1080,8 @@ TEST_UnofficialInstructionsExist:
 	SEC
 	.byte $6B, $42 ; ARR #$42
 	; A = ((A & $42) >> 1) | $80*Carry = $A0
+	; NOTE: This instruction also changes the flags in a unique way.
+	; I'm not testing for hte flag stuff here.
 	CMP #$A0
 	BNE TEST_Fail5		
 	; ARR exists!
@@ -1034,24 +1100,24 @@ TEST_UnofficialInstructionsExist:
 	; SAX exists!
 	INC <currentSubTest
 	
-	;;; Test C [Unofficial Instructions Exist]: Does XAA exist? ;;;
+	;;; Test C [Unofficial Instructions Exist]: Does ANE exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	LDA #$FF
 	LDX #$F0
-	.byte $8B, $30 ; XAA #$30
+	.byte $8B, $30 ; ANE #$30
 	; Due to the way this instruction varies on different CPUs, let's just confirm A is no longer $FF
 	CMP #$FF
 	BEQ TEST_Fail5	
-	; XAA exists!
+	; ANE exists!
 	INC <currentSubTest
 	
-	;;; Test D [Unofficial Instructions Exist]: Does AHX exist? ;;;
+	;;; Test D [Unofficial Instructions Exist]: Does SHA exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	; Test the unstable part too, why not.
 	LDA #$0D
 	LDX #$15
 	LDY #$80
-	.byte $9F ; SAX $0500
+	.byte $9F ; SHA $0500
 	.word $1E80 ; Use a mirror
 	; This goes unstable, so the high byte of the target address will be changed.
 	; Hi = ($1E+1) & A & X;
@@ -1064,7 +1130,7 @@ TEST_UnofficialInstructionsExist:
 	LDA $0500
 	CMP #$05
 	BNE TEST_Fail5
-	; AHX exists!
+	; SHA exists!
 	INC <currentSubTest
 	
 	;;; Test E [Unofficial Instructions Exist]: Does SHX exist? ;;;
@@ -1110,14 +1176,14 @@ TEST_UnofficialInstructions_Continue:
 	; SHY exists!
 	INC <currentSubTest
 	
-	;;; Test G [Unofficial Instructions Exist]: Does TAS exist? ;;;
+	;;; Test G [Unofficial Instructions Exist]: Does SHS exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	TSX
 	STX $501
 	LDA #$0D
 	LDX #$15
 	LDY #$80
-	.byte $9B ; TAS $0500
+	.byte $9B ; SHS $0500
 	.word $1E80 ; Use a mirror
 	; This goes unstable, so the high byte of the target address will be changed.
 	; Hi = ($1E+1) & A & X;
@@ -1128,19 +1194,19 @@ TEST_UnofficialInstructions_Continue:
 	; Before we check $0500, this instruction just destroyed the stack pointer.
 	TSX
 	CPX $0501
-	BNE TEST_UnofficialInstructions_TAS_Continue
+	BNE TEST_UnofficialInstructions_SHS_Continue
 	; The stack pointer was unchanged?!
 	JMP TEST_Fail
-TEST_UnofficialInstructions_TAS_Continue:
+TEST_UnofficialInstructions_SHS_Continue:
 	LDX $501
 	TXS ; Fix the stack pointer.
 	LDA $0500
 	CMP #$05 ; See if this was the right value too.
 	BNE TEST_Fail5
-	; TAS exists!
+	; SHS exists!
 	INC <currentSubTest
 	
-	;;; Test H [Unofficial Instructions Exist]: Does AHX ($zp), Y exist? ;;;
+	;;; Test H [Unofficial Instructions Exist]: Does SHA ($zp), Y exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	; Test the unstable part too, why not.
 	LDA #$80
@@ -1150,7 +1216,7 @@ TEST_UnofficialInstructions_TAS_Continue:
 	LDA #$0D
 	LDX #$15
 	LDY #$80
-	.byte $93, $50 ; SAX ($50) -> $1E80
+	.byte $93, $50 ; SHA ($50) -> $1E80
 	; This goes unstable, so the high byte of the target address will be changed.
 	; Hi = ($1E+1) & A & X;
 	; 	 = $05
@@ -1162,7 +1228,7 @@ TEST_UnofficialInstructions_TAS_Continue:
 	LDA $0500
 	CMP #$05
 	BNE TEST_Fail5
-	; AHX ($zp), Y exists!
+	; SHA ($zp), Y exists!
 	INC <currentSubTest
 
 	;;; Test I [Unofficial Instructions Exist]: Does LAX exist? ;;;
@@ -1191,7 +1257,7 @@ TEST_UnofficialInstructions_TAS_Continue:
 	; LXA exists!
 	INC <currentSubTest
 	
-	;;; Test K [Unofficial Instructions Exist]: Does LAE exist? ;;;
+	;;; Test K [Unofficial Instructions Exist]: Does LAS exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	; This also destroys the stack pointer, so...
 	TSX
@@ -1199,7 +1265,7 @@ TEST_UnofficialInstructions_TAS_Continue:
 	LDA #$33
 	STA $500
 	; The stack pointer *should* be $F6
-	.byte $BB ; LAE $500
+	.byte $BB ; LAS $500
 	.word $0500 
 	; A = StackPointer & Immediate
 	; And then transfer A to X and StackPointer.
@@ -1254,14 +1320,448 @@ TEST_UnofficialInst_2:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
-
-	
-	
-	
 TEST_Fail6:	; This is in the middle of the test, since it saves bytes to branch here.
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
+
+TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $580
+	STX <Copy_X
+	TSX			; Some unofficial instructions modify the stack pointer
+	STX <Copy_SP; make a copy of the stack pointer
+	LDX <Copy_X ; restore X for the test.
+	STA <Copy_A
+	LDA <Test_UnOp_FlagsInit
+	PHA
+	LDA <Copy_A
+	PLP	; Get init flags ready for the test. The T flag isn't a concern.
+TEST_UnOp_RamFuncTest: ; Ram Function TEST
+	NOP	; Overwrite this with the test.
+	NOP	; Overwrite this with the test.
+	NOP	; Overwrite this with the test.
+	PHA
+	PHP	; push the flags from the test
+	PLA ; Pull the status flags off into A
+	AND #$CF ; mask away the B and T flag, which is set by PHP
+	STA <Copy_Flags	; and store the flags here for later
+	PLA
+	STA <Copy_A  ; Store A
+	STX <Copy_X	 ; Store X
+	STX <Copy_SP2; Store Stack Pointer
+	STY <Copy_Y	 ; Store Y
+	LDX <Copy_SP; Fix the stack pointer in case it was modified.
+	TXS
+	LDX <Copy_X ; restore X for the test results.
+	RTS
+TEST_UnOp_RamFuncEnd:
+;;;;;;;;;;;;;;;;;;;;;
+; It's a bit cursed to be creating constants here, but labels need to be defined before you can use them to create constants.
+UnOpTest_Opcode = $0580+(TEST_UnOp_RamFuncTest-TEST_UnOp_RamFunc)
+UnOpTest_Operand = UnOpTest_Opcode+1
+UnOpTest_Operand2 = UnOpTest_Opcode+2
+;;;;;;;	
+TEST_UnOp_Setup:
+	; The tests of the Unofficial Instructions will be using this function to set everything up.
+	; Copy/Paste the test function into RAM.
+	PHA
+	LDX #0
+TEST_UnOp_SetupLoop:
+	LDA TEST_UnOp_RamFunc, X
+	STA $580, X
+	INX
+	CPX #(TEST_UnOp_RamFuncEnd-TEST_UnOp_RamFunc)
+	BNE TEST_UnOp_SetupLoop
+	PLA
+	STA UnOpTest_Opcode
+	RTS
+;;;;;;;
+TEST_UnOp_SetupByAddressingMode:
+	; Setting up RAM for the test!
+	; The goal: around address $580, we have the code to run the test, but the operands are currently EA EA
+	; This function will determine the addressing mode of the test based on the value of the opcode (The A Register)
+	; Then a jump table is used to set up the operands of the test around $580.
+	; For instance, if you want to test LDA $0500, it will jump to TEST_UnOp_SetupAddressingMode_Absolute
+	; ... where the values $00 and $05 will be stored in the operands of the test.
+	; Suppose the test is LDA $0500, X. The value stored will be ($0500-X) so the X offset would reach the correct byte. 
+	; For zero page instructions, the second operand byte is intentionally left as a NOP.
+	;
+	; NOTE: These tests assume you have correct implementation of the various addressing modes.
+	; In other words, the (indirect), Y tests will always use the exact same operands (always using Test_UnOp_IndirectPointerLo)
+	; And the offset for (indirect, X)  test will always land on Test_UnOp_IndirectPointerLo
 	
+	STA <$FF
+	STX <$FD
+	; Determine the addressing mode of this instruction by examining the lower 6 bits.	
+	; Assume A is the opcode
+	STA <$02 ; 2 = opcode
+	; get lower 6 bits.
+	AND #$3F
+	; store this in a temp location
+	STA <$03 ; 3 = lower 6 bits of opcode.
+	; check if we need to flip from an X offset to a Y offset;
+	AND #$17
+	CMP #$17
+	BNE Test_UnOp_DontFlipXtoY
+	LDA <$02 ; A = opcode
+	AND #$C0 ; A = upper 2 bits of opcode
+	CMP #$80 ; ; if only bit 7 is set, flip X to Y
+	BNE Test_UnOp_DontFlipXtoY
+	LDA <$03
+	AND #$1E
+	STA <$03	
+Test_UnOp_DontFlipXtoY:
+	LDA <$03
+	ASL A
+	TAX
+	LDA Test_UnOp_SetupJumpTable,X
+	STA <$0
+	LDA Test_UnOp_SetupJumpTable+1,X
+	STA <$1
+	LDA <$FF
+	LDX <$FD
+	JMP [$0000]
+	
+Test_UnOp_SetupJumpTable:
+	.word TEST_UnOp_SetupAddrMode_Immediate  ; 0 - Immediate
+	.word TEST_Fail							 ; 1 - N/A
+	.word TEST_UnOp_SetupAddrMode_Immediate  ; 2 - Immediate
+	.word TEST_UnOp_SetupAddrMode_IndX  ; 3 - (Indirect, X)
+	.word TEST_UnOp_SetupAddrMode_ZP 		 ; 4 - ZeroPage
+	.word TEST_Fail							 ; 5 - N/A
+	.word TEST_Fail							 ; 6 - N/A
+	.word TEST_UnOp_SetupAddrMode_ZP 		 ; 7 - ZeroPage
+	.word TEST_Fail							 ; 8 - N/A
+	.word TEST_UnOp_SetupAddrMode_Immediate  ; 9 - Immediate
+	.word TEST_Fail							 ; A - N/A
+	.word TEST_UnOp_SetupAddrMode_Immediate  ; B - Immediate
+	.word TEST_UnOp_SetupAddrMode_Abs  		 ; C - Absolute
+	.word TEST_Fail							 ; D - N/A
+	.word TEST_Fail							 ; E - N/A
+	.word TEST_UnOp_SetupAddrMode_Abs  		 ; F - Absolute
+	.word TEST_Fail							 ; 10- N/A
+	.word TEST_Fail							 ; 11- N/A
+	.word TEST_Fail							 ; 12- N/A (HLT is tested elsewhere)
+	.word TEST_UnOp_SetupAddrMode_IndY  ; 13- (Indirect), Y
+	.word TEST_UnOp_SetupAddrMode_ZPX		 ; 14- ZeroPage, X
+	.word TEST_Fail							 ; 15- N/A
+	.word TEST_UnOp_SetupAddrMode_ZPY		 ; 16- ZeroPage, Y !! Not always the case for the official instructions, but it's convenient for this jump table.
+	.word TEST_UnOp_SetupAddrMode_ZPX		 ; 17- ZeroPage, X (or Y if bit 7 is set and bit 6 is not)
+	.word TEST_Fail							 ; 18- N/A
+	.word TEST_Fail							 ; 19- N/A
+	.word TEST_UnOp_SetupAddrMode_Implied    ; 1A- Implied
+	.word TEST_UnOp_SetupAddrMode_AbsY 		 ; 1B- Absolute, Y
+	.word TEST_UnOp_SetupAddrMode_AbsX 		 ; 1C- Absolute, X
+	.word TEST_Fail							 ; 1D- N/A
+	.word TEST_UnOp_SetupAddrMode_AbsY 		 ; 1E- Absolute, Y !! Not always the case for the official instructions, but we don't care about that here.
+	.word TEST_UnOp_SetupAddrMode_AbsX 		 ; 1F- Absolute, X (or Y if bit 7 is set and bit 6 is not)
+
+
+TEST_UnOp_SetupAddrMode_Implied:
+TEST_UnOp_SetupAddrMode_Immediate:
+TEST_UnOp_SetupAddrMode_IndX:
+	STX <Copy_X
+	LDA #Test_UnOp_IndirectPointerLo
+	SEC
+	SBC <Copy_X
+	STA UnOpTest_Operand
+	LDA <Test_UnOp_OperandTargetAddrHi
+	STA <Test_UnOp_IndirectPointerHi
+	LDA <Test_UnOp_OperandTargetAddrLo
+	STA <Test_UnOp_IndirectPointerLo
+	LDA <Test_UnOp_ValueAtAddressForTest
+	LDY #0
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+
+TEST_UnOp_SetupAddrMode_IndY:
+	;;; Set up the test for (Indirect), Y addressed ;;;
+	LDA #Test_UnOp_IndirectPointerLo
+	STA UnOpTest_Operand	
+	STY <Copy_Y
+	LDA <Test_UnOp_OperandTargetAddrHi
+	STA <Test_UnOp_IndirectPointerHi
+	LDA <Test_UnOp_OperandTargetAddrLo
+	SEC
+	SBC <Copy_Y	
+	STA Test_UnOp_IndirectPointerLo
+	BCS TEST_UnOp_IndY_DontDecHigh
+	DEC <Test_UnOp_IndirectPointerHi
+TEST_UnOp_IndY_DontDecHigh	
+	LDA <Test_UnOp_ValueAtAddressForTest
+	LDY #0
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+
+TEST_UnOp_SetupAddrMode_ZP:
+	;;; Set up the test for Zero Page addressed ;;;
+	LDA <Test_UnOp_OperandTargetAddrLo
+	; Only ever test from $50 to $5F
+	AND #$0F
+	ORA #$50
+	STA UnOpTest_Operand
+	STA <Test_UnOp_ExpectedResultAddrLo; Modify the pointers
+	STA <Test_UnOp_OperandTargetAddrLo ; Modify the pointers
+	LDA #0
+	STA <Test_UnOp_ExpectedResultAddrHi; Modify the pointers
+	STA <Test_UnOp_OperandTargetAddrHi; Modify the pointers
+	LDA <Test_UnOp_ValueAtAddressForTest; Load the initial value for the test.
+	STY <Copy_Y
+	LDY #0
+	STA [Test_UnOp_OperandTargetAddrLo],Y
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+
+TEST_UnOp_SetupAddrMode_ZPX:
+	;;; Set up the test for Zero Page addressed ;;;
+	STX <Copy_X
+	LDA <Test_UnOp_OperandTargetAddrLo
+	; Only ever test from $50 to $5F
+	AND #$0F
+	ORA #$50
+	STA <Test_UnOp_ExpectedResultAddrLo; Modify the pointers
+	SEC
+	SBC <Copy_X	
+	STA UnOpTest_Operand
+	STA <Test_UnOp_OperandTargetAddrLo ; Modify the pointers
+	LDA #0
+	STA <Test_UnOp_ExpectedResultAddrHi; Modify the pointers
+	STA <Test_UnOp_OperandTargetAddrHi; Modify the pointers
+	LDA <Test_UnOp_ValueAtAddressForTest; Load the initial value for the test.
+	STY <Copy_Y
+	LDY #0
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+
+TEST_UnOp_SetupAddrMode_ZPY:
+	;;; Set up the test for Zero Page addressed ;;;
+	STY <Copy_Y
+	LDA <Test_UnOp_OperandTargetAddrLo
+	; Only ever test from $50 to $5F
+	AND #$0F
+	ORA #$50
+	STA <Test_UnOp_ExpectedResultAddrLo; Modify the pointers
+	SEC
+	SBC <Copy_Y	
+	STA UnOpTest_Operand
+	STA <Test_UnOp_OperandTargetAddrLo ; Modify the pointers
+	LDA #0
+	STA <Test_UnOp_ExpectedResultAddrHi; Modify the pointers
+	STA <Test_UnOp_OperandTargetAddrHi; Modify the pointers
+	LDA <Test_UnOp_ValueAtAddressForTest; Load the initial value for the test.
+	LDY #0
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+;;;;;;;
+TEST_UnOp_SetupAddrMode_Abs:
+	;;; Set up the test for Absolute addressed ;;;
+	LDA <Test_UnOp_OperandTargetAddrLo
+	STA UnOpTest_Operand
+	LDA <Test_UnOp_OperandTargetAddrHi
+	STA UnOpTest_Operand2
+	LDA <Test_UnOp_ValueAtAddressForTest
+	STY <Copy_Y
+	LDY #0
+	STA [Test_UnOp_OperandTargetAddrLo],Y
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+;;;;;;;
+TEST_UnOp_SetupAddrMode_AbsX:
+;;; Set up the test for Absolute, X addressed ;;;
+	STX <Copy_X
+	LDA <Test_UnOp_OperandTargetAddrHi
+	STA UnOpTest_Operand2
+	LDA <Test_UnOp_OperandTargetAddrLo
+	SEC
+	SBC <Copy_X	
+	STA UnOpTest_Operand
+	BCS TEST_UnOp_AbsX_DontDecHigh
+	DEC UnOpTest_Operand2
+TEST_UnOp_AbsX_DontDecHigh	
+	LDA <Test_UnOp_ValueAtAddressForTest
+	STY <Copy_Y
+	LDY #0
+	STA [Test_UnOp_OperandTargetAddrLo],Y
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+TEST_UnOp_SetupAddrMode_AbsY:
+	STY <Copy_Y
+	LDA <Test_UnOp_OperandTargetAddrHi
+	STA UnOpTest_Operand2
+	LDA <Test_UnOp_OperandTargetAddrLo
+	SEC
+	SBC <Copy_Y	
+	STA UnOpTest_Operand
+	BCS TEST_UnOp_AbsY_DontDecHigh
+	DEC UnOpTest_Operand2
+TEST_UnOp_AbsY_DontDecHigh	
+	LDA <Test_UnOp_ValueAtAddressForTest
+	LDY #0
+	STA [Test_UnOp_OperandTargetAddrLo],Y
+	STA [Test_UnOp_ExpectedResultAddrLo],Y
+	LDY <Copy_Y
+	RTS
+;;;;;;;
+
+TEST_PrepAXYForTest:
+	LDX <Test_UnOp_X
+	LDY <Test_UnOp_Y
+	LDA <Test_UnOp_A
+	RTS
+;;;;;;;
+
+TEST_RunTest_AddrInitAXYF:
+	;.word TargetAddress
+	;.byte Initial, A, X, Y, Flags
+	;.word ResultAddress
+	;.byte result, r_A, r_X, r_Y, r_Flags
+	STA <$FF
+	JSR CopyReturnAddressToByte0
+	LDY #0
+	LDX #0
+TEST_AddrInitAXYF_PreLoop:
+	LDA [$0000],Y
+	STA <Test_UnOp_OperandTargetAddrLo,X
+	INY
+	INX
+	CPX #7 ; Set up $20 through $26
+	BNE TEST_AddrInitAXYF_PreLoop
+	LDX #0
+TEST_AddrInitAXYF_PreLoop2:
+	LDA [$0000],Y
+	STA <Test_UnOp_ExpectedResultAddrLo,X
+	INY
+	INX
+	CPX #7 ; Set up $28 through $2E
+	BNE TEST_AddrInitAXYF_PreLoop2
+	; With the varaibles all set up, let's prep the test:
+	JSR FixRTS
+	JSR TEST_PrepAXYForTest
+	LDA <$FF ; the opcode
+	JSR TEST_UnOp_SetupByAddressingMode ; Set up the operands around $580
+	JSR TEST_PrepAXYForTest
+	JSR $0580	; Run the test!
+	; Evaluating the test.
+	LDA #1
+	STA <currentSubTest	
+	LDY #0
+	LDA [Test_UnOp_ExpectedResultAddrLo],Y
+	CMP <Test_UnOp_ValueAtAddressResult
+	BNE FAIL_RunTest_AddrInitAXYF ; Error code 1: The result at the expected address was incorrect
+	INC <currentSubTest
+	LDA <Copy_A
+	CMP <Test_UnOp_CMP
+	BNE FAIL_RunTest_AddrInitAXYF ; Error code 2: The result of the A register was incorrect
+	INC <currentSubTest
+	LDX <Copy_X
+	CPX <Test_UnOp_CPX
+	BNE FAIL_RunTest_AddrInitAXYF ; Error code 3: The result of the X register was incorrect
+	INC <currentSubTest
+	LDY <Copy_Y
+	CPY <Test_UnOp_CPY
+	BNE FAIL_RunTest_AddrInitAXYF ; Error code 4: The result of the Y register was incorrect
+	LDA <Copy_Flags
+	CMP <Test_UnOp_CM_Flags
+	BNE FAIL_RunTest_AddrInitAXYF ; Error code 5: The result of the flags were incorrect
+	; If you made it this far, we passed this test!
+	; (not necessarily the entire suite, but this specific test, at least)
+	RTS
+FAIL_RunTest_AddrInitAXYF:
+	PLA	; Pull of the Return Address
+	PLA	;
+	JMP TEST_Fail ; and fail the test.
+
+;Test_UnOp_OperandTargetAddrLo = $20
+;Test_UnOp_OperandTargetAddrHi = $21
+;Test_UnOp_ValueAtAddressForTest = $22
+;Test_UnOp_A = $23
+;Test_UnOp_X = $24
+;Test_UnOp_Y = $25
+;Test_UnOp_FlagsInit = $26
+;Test_UnOp_SP = $27
+;Test_UnOp_ExpectedResultAddrLo = $28
+;Test_UnOp_ExpectedResultAddrHi = $29
+;Test_UnOp_ValueAtAddressResult = $2A
+;Test_UnOp_CMP = $2B
+;Test_UnOp_CPX = $2C
+;Test_UnOp_CPY = $2D
+;Test_UnOp_CM_Flags = $2E
+;Test_UnOp_CPS = $2F
+
+;Test_UnOp_IndirectPointerLo = $30
+;Test_UnOp_IndirectPointerHi = $31
+
+
+
+
+TEST_SLO_03:
+	LDA #$03
+	BNE TEST_SLO
+TEST_SLO_07:
+	LDA #$07
+	BNE TEST_SLO
+TEST_SLO_0F:
+	LDA #$0F
+	BNE TEST_SLO
+TEST_SLO_13:
+	LDA #$13
+	BNE TEST_SLO
+TEST_SLO_17:
+	LDA #$17
+	BNE TEST_SLO
+TEST_SLO_1B:
+	LDA #$1B
+	BNE TEST_SLO
+TEST_SLO_1F:
+	LDA #$1F
+TEST_SLO:
+	JSR TEST_UnOp_Setup 			; Set the opcode
+	; Run a test; TODO, white somethign better here.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	;    init, A,   X,   Y,   flags
+	.byte $40, $01, $64, $45, (flag_c | flag_z | flag_i)
+	.word $0500
+	;  result, A,   X,   Y,   flags
+	.byte $80, $81, $64, $45, (flag_i | flag_n)
+	
+	NOP
+	NOP
+	NOP
+	NOP
+	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 	
 	
 	.bank 3
@@ -1308,7 +1808,7 @@ DisableNMI:
 ;;;;;;;
 
 ResetScroll:
-	LDA $20
+	LDA #$20
 	STA $2006
 	LDA #$00
 	STA $2006
@@ -1386,9 +1886,9 @@ ClearPage5Loop:
 ;;;;;;;
 
 PrintText:
-	STA <byteFF
-	STY <byteFE
-	STX <byteFD
+	STA <Copy_A
+	STY <Copy_Y
+	STX <Copy_X
 	LDA <dontSetPointer
 	BNE PT_dontSetPointer
 	JSR CopyReturnAddressToByte0
@@ -1420,17 +1920,17 @@ PTpostLoop:
 	LDA <dontSetPointer
 	BNE PTskipFixRTS
 	JSR FixRTS
-	LDY <byteFE
+	LDY <Copy_Y
 PTskipFixRTS:
-	LDX <byteFD
-	LDA <byteFF
+	LDX <Copy_X
+	LDA <Copy_A
 	RTS
 ;;;;;;;
 
 PrintTextCentered:
-	STA <byteFF
-	STY <byteFE
-	STX <byteFD
+	STA <Copy_A
+	STY <Copy_Y
+	STX <Copy_X
 	LDA <dontSetPointer
 	BNE PTC_dontSetPointer
 	JSR CopyReturnAddressToByte0
@@ -1482,19 +1982,19 @@ PTCpostLoop:
 	LDA <dontSetPointer
 	BNE PTCskipFixRTS
 	JSR FixRTS
-	LDY <byteFE
+	LDY <Copy_Y
 PTCskipFixRTS:
-	LDX <byteFD
-	LDA <byteFF
+	LDX <Copy_X
+	LDA <Copy_A
 	RTS
 ;;;;;;;
 
 
 Print32Bytes:
 	; print the 32 bytes found at the target address.
-	STA <byteFF
-	STY <byteFE
-	STX <byteFD
+	STA <Copy_A
+	STY <Copy_Y
+	STX <Copy_X
 	JSR CopyReturnAddressToByte0
 	LDA $2002
 	LDY #$01
@@ -1549,9 +2049,9 @@ P32SkipADDR:
 	; post loop
 	LDY #02
 	JSR FixRTS
-	LDX <byteFD
-	LDY <byteFE
-	LDA <byteFF
+	LDX <Copy_X
+	LDY <Copy_Y
+	LDA <Copy_A
 	RTS
 ;;;;;;;
 
@@ -1922,13 +2422,15 @@ AttributePaletteNybbles:
 	.byte $00, $55, $AA, $FF
 	
 TestPassFailBlend:
-	.byte "TPF.EAA.SSI.TSL."
-
+	.byte "TPF."
+	.byte "EAA."
+	.byte "SSI."
+	.byte "TSL."
 
 AsciiToCHR:
 	.byte $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
 	.byte $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
-	.byte $24, $26, $24, $24, $35, $24, $24, $24, $24, $24, $32, $30, $24, $31, $25, $33
+	.byte $24, $26, $24, $24, $35, $24, $24, $24, $24, $24, $32, $30, $29, $31, $25, $33
 	.byte $00, $01, $02, $03, $04, $05, $06, $07, $08, $09, $28, $24, $24, $34, $24, $27
 	.byte $24, $0A, $0B, $0C, $0D, $0E, $0F, $10, $11, $12, $13, $14, $15, $16, $17, $18
 	.byte $19, $1A, $1B, $1C, $1D, $1E, $1F, $20, $21, $22, $23, $24, $24, $24, $24, $24
