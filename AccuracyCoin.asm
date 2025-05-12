@@ -147,6 +147,23 @@ result_UnOp_RRA_77 = $42B
 result_UnOp_RRA_7B = $42C
 result_UnOp_RRA_7F = $42D
 
+result_UnOp_SAX_83 = $42E
+result_UnOp_SAX_87 = $42F
+result_UnOp_SAX_8F = $430
+result_UnOp_SAX_9F = $431
+result_UnOp_LAX_A3 = $432
+result_UnOp_LAX_A7 = $433
+result_UnOp_LAX_AF = $434
+result_UnOp_LAX_B3 = $435
+result_UnOp_LAX_B7 = $436
+result_UnOp_LAX_BF = $437
+
+
+
+
+
+
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -300,6 +317,7 @@ TableTable:
 	.word Suite_UnofficialOps_RLA
 	.word Suite_UnofficialOps_SRE
 	.word Suite_UnofficialOps_RRA
+	.word Suite_UnofficialOps__AX
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
@@ -336,7 +354,7 @@ Suite_UnofficialOps_SLO:
 	table "$1F   SLO absolute,X", $FF, result_UnOp_SLO_1F, TEST_SLO_1F
 	.byte $FF
 	
-		;; Unofficial Instructions: RLA ;;
+	;; Unofficial Instructions: RLA ;;
 Suite_UnofficialOps_RLA:
 	.byte "Unofficial Instructions: RLA", $FF
 	table "$23   RLA indirect,X", $FF, result_UnOp_RLA_23, TEST_RLA_23
@@ -348,7 +366,7 @@ Suite_UnofficialOps_RLA:
 	table "$3F   RLA absolute,X", $FF, result_UnOp_RLA_3F, TEST_RLA_3F
 	.byte $FF
 	
-		;; Unofficial Instructions: SRE ;;
+	;; Unofficial Instructions: SRE ;;
 Suite_UnofficialOps_SRE:
 	.byte "Unofficial Instructions: SRE", $FF
 	table "$43   SRE indirect,X", $FF, result_UnOp_SRE_43, TEST_SRE_43
@@ -360,7 +378,7 @@ Suite_UnofficialOps_SRE:
 	table "$5F   SRE absolute,X", $FF, result_UnOp_SRE_5F, TEST_SRE_5F
 	.byte $FF
 	
-		;; Unofficial Instructions: RRA ;;
+	;; Unofficial Instructions: RRA ;;
 Suite_UnofficialOps_RRA:
 	.byte "Unofficial Instructions: RRA", $FF
 	table "$63   RRA indirect,X", $FF, result_UnOp_RRA_63, TEST_RRA_63
@@ -370,6 +388,22 @@ Suite_UnofficialOps_RRA:
 	table "$77   RRA zeropage,X", $FF, result_UnOp_RRA_77, TEST_RRA_77
 	table "$7B   RRA absolute,Y", $FF, result_UnOp_RRA_7B, TEST_RRA_7B
 	table "$7F   RRA absolute,X", $FF, result_UnOp_RRA_7F, TEST_RRA_7F
+	.byte $FF
+	
+	;; Unofficial Instructions: .AX ;;
+Suite_UnofficialOps__AX:
+	.byte "Unofficial Instructions: *AX", $FF
+	table "$83   SAX indirect,X", $FF, result_UnOp_SAX_83, TEST_SAX_83
+	table "$87   SAX zeropage",   $FF, result_UnOp_SAX_87, TEST_SAX_87
+	table "$8F   SAX absolute",   $FF, result_UnOp_SAX_8F, TEST_SAX_8F
+	table "$97   SAX zeropage,Y", $FF, result_UnOp_SAX_9F, TEST_SAX_97
+
+	table "$A3   LAX indirect,X", $FF, result_UnOp_LAX_A3, TEST_LAX_A3
+	table "$A7   LAX zeropage",   $FF, result_UnOp_LAX_A7, TEST_LAX_A7
+	table "$AF   LAX absolute",   $FF, result_UnOp_LAX_AF, TEST_LAX_AF
+	table "$B3   LAX indirect,Y", $FF, result_UnOp_LAX_B3, TEST_LAX_B3
+	table "$B7   LAX zeropage,X", $FF, result_UnOp_LAX_B7, TEST_LAX_B7
+	table "$BF   LAX absolute,X", $FF, result_UnOp_LAX_BF, TEST_LAX_BF
 	.byte $FF
 	
 	;; Unofficial Instructions: The Immediate group ;;
@@ -2101,6 +2135,101 @@ TEST_RRA:
 	LDA #1
 	RTS
 ;;;;;;;
+
+TEST_SAX_83:
+	LDA #$83
+	BNE TEST_SAX
+TEST_SAX_87:
+	LDA #$87
+	BNE TEST_SAX
+TEST_SAX_8F:
+	LDA #$8F
+	BNE TEST_SAX
+TEST_SAX_97:
+	LDA #$97
+TEST_SAX:
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; see TEST_SLO for an explanation of the format here.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $5A
+	.byte $F3, $3F, $45, (flag_i | flag_c | flag_z | flag_v)
+	.word $0500
+	.byte $33
+	.byte $F3, $3F, $45, (flag_i | flag_c | flag_z | flag_v)
+	; SAX ;
+	; Store A & X;
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $05D2
+	.byte $21
+	.byte $5A, $A5, $45, (flag_i)
+	.word $05D2
+	.byte $00
+	.byte $5A, $A5, $45, (flag_i)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $05D2
+	.byte $21
+	.byte $90, $E0, $45, (flag_i | flag_c)
+	.word $05D2
+	.byte $80
+	.byte $90, $E0, $45, (flag_i | flag_c)
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+TEST_LAX_A3:
+	LDA #$A3
+	BNE TEST_LAX
+TEST_LAX_A7:
+	LDA #$A7
+	BNE TEST_LAX
+TEST_LAX_AF:
+	LDA #$AF
+	BNE TEST_LAX
+TEST_LAX_B3:
+	LDA #$B3
+	BNE TEST_LAX
+TEST_LAX_B7:
+	LDA #$B7
+	BNE TEST_LAX
+TEST_LAX_BF:
+	LDA #$BF
+TEST_LAX:
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; see TEST_SLO for an explanation of the format here.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $00
+	.byte $07, $64, $45, (flag_i | flag_c | flag_v)
+	.word $0500
+	.byte $00
+	.byte $00, $00, $45, (flag_i | flag_c | flag_z | flag_v)
+	; LAX ;
+	; Load A and X ;
+
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $9F
+	.byte $00, $00, $88, (flag_i | flag_z)
+	.word $0500
+	.byte $9F
+	.byte $9F, $9F, $88, (flag_i | flag_n)
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+
+
 
 
 TEST_ANC_0B:
