@@ -166,7 +166,13 @@ result_UnOp_DCP_D7 = $43C
 result_UnOp_DCP_DB = $43D
 result_UnOp_DCP_DF = $43E
 
-
+result_UnOp_ISC_E3 = $43F
+result_UnOp_ISC_E7 = $440
+result_UnOp_ISC_EF = $441
+result_UnOp_ISC_F3 = $442
+result_UnOp_ISC_F7 = $443
+result_UnOp_ISC_FB = $444
+result_UnOp_ISC_FF = $445
 
 
 
@@ -325,6 +331,7 @@ TableTable:
 	.word Suite_UnofficialOps_RRA
 	.word Suite_UnofficialOps__AX
 	.word Suite_UnofficialOps_DCP
+	.word Suite_UnofficialOps_ISC
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
@@ -422,6 +429,18 @@ Suite_UnofficialOps_DCP:
 	table "$B7   DCP zeropage,X", $FF, result_UnOp_DCP_D7, TEST_DCP_D7
 	table "$BB   DCP absolute,Y", $FF, result_UnOp_DCP_DB, TEST_DCP_DB
 	table "$BF   DCP absolute,X", $FF, result_UnOp_DCP_DF, TEST_DCP_DF
+	.byte $FF
+	
+	;; Unofficial Instructions: DCP ;;
+Suite_UnofficialOps_ISC:
+	.byte "Unofficial Instructions: ISC", $FF
+	table "$E3   ISC indirect,X", $FF, result_UnOp_ISC_E3, TEST_ISC_E3
+	table "$E7   ISC zeropage",   $FF, result_UnOp_ISC_E7, TEST_ISC_E7
+	table "$EF   ISC absolute",   $FF, result_UnOp_ISC_EF, TEST_ISC_EF
+	table "$E3   ISC indirect,Y", $FF, result_UnOp_ISC_F3, TEST_ISC_F3
+	table "$F7   ISC zeropage,X", $FF, result_UnOp_ISC_F7, TEST_ISC_F7
+	table "$FB   ISC absolute,Y", $FF, result_UnOp_ISC_FB, TEST_ISC_FB
+	table "$FF   ISC absolute,X", $FF, result_UnOp_ISC_FF, TEST_ISC_FF
 	.byte $FF
 	
 	;; Unofficial Instructions: The Immediate group ;;
@@ -2281,18 +2300,18 @@ TEST_DCP:
 	; DEC, then  CMP ;
 	
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $0500
+	.word $05F0
 	.byte $00
 	.byte $F2, $00, $11, (flag_i)
-	.word $0500
+	.word $05F0
 	.byte $FF
 	.byte $F2, $00, $11, (flag_i | flag_n)
 	
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $0500
+	.word $0522
 	.byte $80
 	.byte $80, $8F, $E3, (flag_i)
-	.word $0500
+	.word $0522
 	.byte $7F
 	.byte $80, $8F, $E3, (flag_i | flag_c)
 	
@@ -2302,6 +2321,61 @@ TEST_DCP:
 	RTS
 ;;;;;;;
 
+TEST_ISC_E3:
+	LDA #$E3
+	BNE TEST_ISC
+TEST_ISC_E7:
+	LDA #$E7
+	BNE TEST_ISC
+TEST_ISC_EF:
+	LDA #$EF
+	BNE TEST_ISC
+TEST_ISC_F3:
+	LDA #$F3
+	BNE TEST_ISC
+TEST_ISC_F7:
+	LDA #$F7
+	BNE TEST_ISC
+TEST_ISC_FB:
+	LDA #$FB
+	BNE TEST_ISC
+TEST_ISC_FF:
+	LDA #$FF
+TEST_ISC:
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; see TEST_SLO for an explanation of the format here.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $3F
+	.byte $75, $64, $45, (flag_i)
+	.word $0500
+	.byte $40
+	.byte $34, $64, $45, (flag_i | flag_c)
+	; ISC ;
+	; INC, then SBC ;
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $05BB
+	.byte $96
+	.byte $98, $15, $8F, (flag_i)
+	.word $05BB
+	.byte $97
+	.byte $00, $15, $8F, (flag_i | flag_z | flag_c)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $05BB
+	.byte $7F
+	.byte $05, $15, $8F, (flag_i)
+	.word $05BB
+	.byte $80
+	.byte $84, $15, $8F, (flag_i | flag_v | flag_n)
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
 
 
 TEST_ANC_0B:
