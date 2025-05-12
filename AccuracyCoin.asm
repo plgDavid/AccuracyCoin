@@ -123,6 +123,13 @@ result_UnOp_AXS_CB	= $416
 result_UnOp_SBC_EB	= $417
 result_UnOp_Magic = $418
 
+result_UnOp_RLA_23 = $419
+result_UnOp_RLA_27 = $41A
+result_UnOp_RLA_2F = $41B
+result_UnOp_RLA_33 = $41C
+result_UnOp_RLA_37 = $41D
+result_UnOp_RLA_3B = $41E
+result_UnOp_RLA_3F = $41F
 
 
 result_PowOn_CPURAM = $0480
@@ -274,6 +281,7 @@ table .macro
 TableTable:
 	.word Suite_CPUBehavior
 	.word Suite_UnofficialOps_SLO
+	.word Suite_UnofficialOps_RLA
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
@@ -298,7 +306,7 @@ Suite_CPUBehavior:
 	table "Open Bus", $FF, result_OpenBus, TEST_OpenBus
 	.byte $FF
 	
-		;; Unofficial Instructions: SLO ;;
+	;; Unofficial Instructions: SLO ;;
 Suite_UnofficialOps_SLO:
 	.byte "Unofficial Instructions: SLO", $FF
 	table "$03   SLO indirect,X", $FF, result_UnOp_SLO_03, TEST_SLO_03
@@ -310,6 +318,19 @@ Suite_UnofficialOps_SLO:
 	table "$1F   SLO absolute,X", $FF, result_UnOp_SLO_1F, TEST_SLO_1F
 	.byte $FF
 	
+		;; Unofficial Instructions: RLA ;;
+Suite_UnofficialOps_RLA:
+	.byte "Unofficial Instructions: RLA", $FF
+	table "$23   RLA indirect,X", $FF, result_UnOp_RLA_23, TEST_RLA_23
+	table "$27   RLA zeropage",   $FF, result_UnOp_RLA_27, TEST_RLA_27
+	table "$2F   RLA absolute",   $FF, result_UnOp_RLA_2F, TEST_RLA_2F
+	table "$33   RLA indirect,Y", $FF, result_UnOp_RLA_33, TEST_RLA_33
+	table "$37   RLA zeropage,X", $FF, result_UnOp_RLA_37, TEST_RLA_37
+	table "$3B   RLA absolute,Y", $FF, result_UnOp_RLA_3B, TEST_RLA_3B
+	table "$3F   RLA absolute,X", $FF, result_UnOp_RLA_3F, TEST_RLA_3F
+	.byte $FF
+	
+	;; Unofficial Instructions: The Immediate group ;;
 Suite_UnofficialOps_Immediates:
 	.byte "Unofficial Immediates", $FF
 	table "$0B   ANC Immediate", $FF, result_UnOp_ANC_0B, TEST_ANC_0B
@@ -1813,9 +1834,11 @@ TEST_SLO:
 	;
 	; JSR TEST_RunTest_AddrInitAXYF
 	; iAddress
-	; iValue, iA,   iX,   iY,   iflags
+	; iValue 
+	; iA,   iX,   iY,   iflags
 	; rAddress
-	; rValue, rA,   rX,   rY,   rflags
+	; rValue 
+	; rA,   rX,   rY,   rflags
 	;
 	; The address at "iAddress" will be assigned the value of "iValue". 
 	; The A register will be assigned the value of iA, the X register will be assigned the value of iX, and so on.
@@ -1828,9 +1851,11 @@ TEST_SLO:
 	
 	JSR TEST_RunTest_AddrInitAXYF
 	.word $0500
-	.byte $40, $01, $64, $45, (flag_i | flag_c | flag_z)
+	.byte $40
+	.byte $01, $64, $45, (flag_i | flag_c | flag_z)
 	.word $0500
-	.byte $80, $81, $64, $45, (flag_i | flag_n)
+	.byte $80
+	.byte $81, $64, $45, (flag_i | flag_n)
 	; SLO ;
 	; Let's walk through this one for the sake of documentation.
 	; $0500 = $40, A = $01
@@ -1844,17 +1869,77 @@ TEST_SLO:
 	
 	JSR TEST_RunTest_AddrInitAXYF
 	.word $057F
-	.byte $FF, $00, $21, $9E, (flag_i | flag_v)
+	.byte $FF
+	.byte $00, $21, $9E, (flag_i | flag_v)
 	.word $057F
-	.byte $FE, $FE, $21, $9E, (flag_i | flag_n | flag_c | flag_v)
+	.byte $FE
+	.byte $FE, $21, $9E, (flag_i | flag_n | flag_c | flag_v)
 	
 	JSR TEST_RunTest_AddrInitAXYF
 	.word $05FF
-	.byte $00, $00, $FF, $FF, (flag_i | flag_c)
+	.byte $00
+	.byte $00, $FF, $FF, (flag_i | flag_c)
 	.word $05FF
-	.byte $00, $00, $FF, $FF, (flag_i | flag_z)	
+	.byte $00
+	.byte $00, $FF, $FF, (flag_i | flag_z)	
 	; This one really doesn't have any wild edge cases or anything.
 	; it's probably a safe bet to assume if your emulator made it this far, then it's good.	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+TEST_RLA_23:
+	LDA #$23
+	BNE TEST_RLA
+TEST_RLA_27:
+	LDA #$27
+	BNE TEST_RLA
+TEST_RLA_2F:
+	LDA #$2F
+	BNE TEST_RLA
+TEST_RLA_33:
+	LDA #$33
+	BNE TEST_RLA
+TEST_RLA_37:
+	LDA #$37
+	BNE TEST_RLA
+TEST_RLA_3B:
+	LDA #$3B
+	BNE TEST_RLA
+TEST_RLA_3F:
+	LDA #$3F
+TEST_RLA:
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; see TEST_SLO for an explanation of the format here.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $44
+	.byte $C1, $64, $45, (flag_i | flag_c | flag_z)
+	.word $0500
+	.byte $89
+	.byte $81, $64, $45, (flag_i | flag_n)
+	; RLA ;
+	; ROL, then AND ;
+
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0544
+	.byte $0F
+	.byte $33, $7B, $FE, (flag_i | flag_z | flag_v)
+	.word $0544
+	.byte $1E
+	.byte $12, $7B, $FE, (flag_i | flag_v)
+
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $05BF
+	.byte $00
+	.byte $A5, $E1, $00, (flag_i | flag_z | flag_n)
+	.word $05BF
+	.byte $00
+	.byte $00, $E1, $00, (flag_i | flag_z)
+
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -1922,6 +2007,7 @@ TEST_ASR_4B:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
+;;;;;;;
 
 TEST_ARR_6B:
 	LDA #$6B
@@ -1946,16 +2032,61 @@ TEST_ARR_6B:
 	.byte $F3, $64, $45, (flag_i | flag_z | flag_c)
 	.byte $A1, $64, $45, (flag_i | flag_v | flag_n)
 	
-	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
+;;;;;;;
 
 TEST_ANE_8B:
-TEST_LXA_AB:
+	LDA #$8B
+	JSR TEST_UnOp_Setup ; Set the opcode
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $00
+	.byte $5A, $3B, $45, (flag_i | flag_z | flag_c)
+	.byte $00, $3B, $45, (flag_i | flag_z | flag_c)
+	; ANE ;
+	; A = (((A | Magic) & X) & Immediate)
+	; The "Magic" value is not consistent, and so this test cannot rely on any specific value.
+	; It is possible to test and see what this value is, but it could be different between tests.
+	; Because of this, the tests used here need to specifically verify behavior only in cases where the magic value does not alter the outcome.
+	; Basically, unless Immediate is $00, or A is $FF, the outcome is not guaranteed.
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $CF
+	.byte $FF, $9F, $99, (flag_i | flag_z | flag_v)
+	.byte $8F, $9F, $99, (flag_i | flag_n | flag_v)
+	
+	; That's pretty much all we can test with this instruction, so we're good to go!
 	;; END OF TEST ;;
-	LDA #2
+	LDA #1
 	RTS
+;;;;;;;
+
+TEST_LXA_AB:
+	LDA #$AB
+	JSR TEST_UnOp_Setup ; Set the opcode
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $00
+	.byte $5A, $3B, $45, (flag_i | flag_z | flag_c)
+	.byte $00, $00, $45, (flag_i | flag_z | flag_c)
+	; LXA ;
+	; A = ((A | Magic) & Immediate), X = A
+	; The "Magic" value is not consistent, and so this test cannot rely on any specific value.
+	; It is possible to test and see what this value is, but it could be different between tests.
+	; Because of this, the tests used here need to specifically verify behavior only in cases where the magic value does not alter the outcome.
+	; Basically, unless Immediate is $00, or A is $FF, the outcome is not guaranteed.
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $A5
+	.byte $FF, $8F, $99, (flag_i | flag_z | flag_v)
+	.byte $A5, $A5, $99, (flag_i | flag_n | flag_v)
+	
+	; That's pretty much all we can test with this instruction, so we're good to go!
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+	
+	
 TEST_AXS_CB:
 	LDA #$CB
 	JSR TEST_UnOp_Setup ; Set the opcode
@@ -1981,13 +2112,37 @@ TEST_AXS_CB:
 	.byte $C5, $5F, $00, (flag_i | flag_n)
 	.byte $C5, $00, $00, (flag_i | flag_z | flag_c)
 	
-	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
 
 TEST_SBC_EB:
-	LDA #02
+	LDA #$EB
+	JSR TEST_UnOp_Setup ; Set the opcode
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $10
+	.byte $F0, $22, $75, (flag_i | flag_z | flag_c | flag_v)
+	.byte $E0, $22, $75, (flag_i | flag_c | flag_n)
+	; SBC ;
+	; It's the same as the official SBC Immediate instruction.
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $EE
+	.byte $52, $93, $B2, (flag_i)
+	.byte $63, $93, $B2, (flag_i)
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $80
+	.byte $05, $C0, $1F, (flag_i | flag_z | flag_c | flag_v | flag_n)
+	.byte $85, $C0, $1F, (flag_i| flag_v | flag_n)
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $43
+	.byte $44, $C0, $1F, (flag_i)
+	.byte $00, $C0, $1F, (flag_i| flag_z | flag_c)
+	
+	;; END OF TEST ;;
+	LDA #1
 	RTS
 
 TEST_MAGIC:
