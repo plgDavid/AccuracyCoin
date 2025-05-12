@@ -113,6 +113,17 @@ result_UnOp_SLO_17 = $40D
 result_UnOp_SLO_1B = $40E
 result_UnOp_SLO_1F = $40F
 
+result_UnOp_ANC_0B	= $410
+result_UnOp_ANC_2B	= $411
+result_UnOp_ASR_4B	= $412
+result_UnOp_ARR_6B	= $413
+result_UnOp_ANE_8B	= $414
+result_UnOp_LXA_AB	= $415
+result_UnOp_AXS_CB	= $416
+result_UnOp_SBC_EB	= $417
+
+
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -260,6 +271,7 @@ table .macro
 TableTable:
 	.word Suite_CPUBehavior
 	.word Suite_UnofficialOps_SLO
+	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
 	.word Suite_PowerOnState
@@ -293,6 +305,18 @@ Suite_UnofficialOps_SLO:
 	table "$17   SLO zeropage,X", $FF, result_UnOp_SLO_17, TEST_SLO_17
 	table "$1B   SLO absolute,Y", $FF, result_UnOp_SLO_1B, TEST_SLO_1B
 	table "$1F   SLO absolute,X", $FF, result_UnOp_SLO_1F, TEST_SLO_1F
+	.byte $FF
+	
+Suite_UnofficialOps_Immediates:
+	.byte "Unofficial Immediates", $FF
+	table "$0B   ANC Immediate", $FF, result_UnOp_ANC_0B, TEST_ANC_0B
+	table "$2B   ANC Immediate", $FF, result_UnOp_ANC_2B, TEST_ANC_2B
+	table "$4B   ASR Immediate", $FF, result_UnOp_ASR_4B, TEST_ASR_4B
+	table "$6B   ARR Immediate", $FF, result_UnOp_ARR_6B, TEST_ARR_6B
+	table "$8B   ANE Immediate", $FF, result_UnOp_ANE_8B, TEST_ANE_8B
+	table "$AB   LXA Immediate", $FF, result_UnOp_LXA_AB, TEST_LXA_AB
+	table "$CB   AXS Immediate", $FF, result_UnOp_AXS_CB, TEST_AXS_CB
+	table "$EB   SBC Immediate", $FF, result_UnOp_SBC_EB, TEST_SBC_EB
 	.byte $FF
 	
 	
@@ -872,6 +896,7 @@ TEST_PowerOnState_CPU_RAM:
 	JSR Print32Bytes
 	.word $2244
 	.word PowerOnRAM
+	JSR ResetScroll
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -885,6 +910,7 @@ TEST_PowerOnState_PPU_RAM:
 	JSR Print32Bytes
 	.word $2244
 	.word PowerOnVRAM
+	JSR ResetScroll
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -898,6 +924,7 @@ TEST_PowerOnState_PPU_Palette:
 	JSR Print32Bytes
 	.word $2244
 	.word PowerOnPalette
+	JSR ResetScroll
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -954,6 +981,7 @@ TEST_PowerOnState_CPU_Registers:
 	LDA PowerOn_P
 	JSR PrintByte
 	;; END OF TEST ;;
+	JSR ResetScroll
 	LDA #1
 	STA <dontSetPointer
 	RTS
@@ -1393,10 +1421,10 @@ TEST_UnOp_SetupByAddressingMode:
 	; Determine the addressing mode of this instruction by examining the lower 6 bits.	
 	; Assume A is the opcode
 	STA <$02 ; 2 = opcode
-	; get lower 6 bits.
-	AND #$3F
+	; get lower 5 bits.
+	AND #$1F
 	; store this in a temp location
-	STA <$03 ; 3 = lower 6 bits of opcode.
+	STA <$03 ; 3 = lower 5 bits of opcode.
 	; check if we need to flip from an X offset to a Y offset;
 	AND #$17
 	CMP #$17
@@ -1457,6 +1485,10 @@ Test_UnOp_SetupJumpTable:
 
 TEST_UnOp_SetupAddrMode_Implied:
 TEST_UnOp_SetupAddrMode_Immediate:
+	LDA Test_UnOp_ValueAtAddressForTest
+	STA UnOpTest_Operand
+	RTS
+
 TEST_UnOp_SetupAddrMode_IndX:
 	STX <Copy_X
 	LDA #Test_UnOp_IndirectPointerLo
@@ -1615,6 +1647,45 @@ TEST_PrepAXYForTest:
 	RTS
 ;;;;;;;
 
+TEST_UnOpRunTest:
+	JSR TEST_PrepAXYForTest
+	LDA <$FF ; the opcode
+	JSR TEST_UnOp_SetupByAddressingMode ; Set up the operands around $580
+	JSR TEST_PrepAXYForTest
+	JSR $0580	; Run the test!
+	RTS
+;;;;;;;
+
+Test_UnOpEvaluateResults:
+	LDY #0
+	LDA [Test_UnOp_ExpectedResultAddrLo],Y
+	CMP <Test_UnOp_ValueAtAddressResult
+	BNE FAIL_UnOpTest ; Error code 1: The result at the expected address was incorrect
+	INC <currentSubTest
+Test_UnOpEvaluateResults_StartA:
+	LDA <Copy_A
+	CMP <Test_UnOp_CMP
+	BNE FAIL_UnOpTest ; Error code 2: The result of the A register was incorrect
+	INC <currentSubTest
+	LDX <Copy_X
+	CPX <Test_UnOp_CPX
+	BNE FAIL_UnOpTest ; Error code 3: The result of the X register was incorrect
+	INC <currentSubTest
+	LDY <Copy_Y
+	CPY <Test_UnOp_CPY
+	BNE FAIL_UnOpTest ; Error code 4: The result of the Y register was incorrect
+	INC <currentSubTest
+	LDA <Copy_Flags
+	CMP <Test_UnOp_CM_Flags
+	BNE FAIL_UnOpTest ; Error code 5: The result of the flags were incorrect
+	RTS ; Pass!
+FAIL_UnOpTest:
+	PLA	; Pull of the Return Address
+	PLA	;
+	PLA
+	PLA
+	JMP TEST_Fail ; and fail the test.
+
 TEST_RunTest_AddrInitAXYF:
 	;.word TargetAddress
 	;.byte Initial, A, X, Y, Flags
@@ -1641,40 +1712,47 @@ TEST_AddrInitAXYF_PreLoop2:
 	BNE TEST_AddrInitAXYF_PreLoop2
 	; With the varaibles all set up, let's prep the test:
 	JSR FixRTS
-	JSR TEST_PrepAXYForTest
-	LDA <$FF ; the opcode
-	JSR TEST_UnOp_SetupByAddressingMode ; Set up the operands around $580
-	JSR TEST_PrepAXYForTest
-	JSR $0580	; Run the test!
+	JSR TEST_UnOpRunTest
 	; Evaluating the test.
 	LDA #1
 	STA <currentSubTest	
-	LDY #0
-	LDA [Test_UnOp_ExpectedResultAddrLo],Y
-	CMP <Test_UnOp_ValueAtAddressResult
-	BNE FAIL_RunTest_AddrInitAXYF ; Error code 1: The result at the expected address was incorrect
-	INC <currentSubTest
-	LDA <Copy_A
-	CMP <Test_UnOp_CMP
-	BNE FAIL_RunTest_AddrInitAXYF ; Error code 2: The result of the A register was incorrect
-	INC <currentSubTest
-	LDX <Copy_X
-	CPX <Test_UnOp_CPX
-	BNE FAIL_RunTest_AddrInitAXYF ; Error code 3: The result of the X register was incorrect
-	INC <currentSubTest
-	LDY <Copy_Y
-	CPY <Test_UnOp_CPY
-	BNE FAIL_RunTest_AddrInitAXYF ; Error code 4: The result of the Y register was incorrect
-	LDA <Copy_Flags
-	CMP <Test_UnOp_CM_Flags
-	BNE FAIL_RunTest_AddrInitAXYF ; Error code 5: The result of the flags were incorrect
+	JSR Test_UnOpEvaluateResults
 	; If you made it this far, we passed this test!
 	; (not necessarily the entire suite, but this specific test, at least)
+	LDA UnOpTest_Opcode ; reset this value before the next test, assuming another one follows
 	RTS
-FAIL_RunTest_AddrInitAXYF:
-	PLA	; Pull of the Return Address
-	PLA	;
-	JMP TEST_Fail ; and fail the test.
+;;;;;;;
+	
+TEST_RunTest_ImmOperandAXYF:
+	STA <$FF
+	JSR CopyReturnAddressToByte0
+	LDY #0
+	LDX #0
+TEST_ImmOperandAXYF_PreLoop:
+	LDA [$0000],Y
+	STA <Test_UnOp_ValueAtAddressForTest,X
+	INY
+	INX
+	CPX #5 ; Set up $22 through $26
+	BNE TEST_ImmOperandAXYF_PreLoop
+	LDX #0
+TEST_ImmOperandAXYF_PreLoop2:
+	LDA [$0000],Y
+	STA <Test_UnOp_CMP,X
+	INY
+	INX
+	CPX #4 ; Set up $22 through $26
+	BNE TEST_ImmOperandAXYF_PreLoop2
+	JSR FixRTS
+	JSR TEST_UnOpRunTest
+	LDA #2
+	STA <currentSubTest	
+	JSR Test_UnOpEvaluateResults_StartA
+	; If you made it this far, we passed this test!
+	; (not necessarily the entire suite, but this specific test, at least)
+	LDA UnOpTest_Opcode ; reset this value before the next test, assuming another one follows
+	RTS
+;;;;;;;
 
 ;Test_UnOp_OperandTargetAddrLo = $20
 ;Test_UnOp_OperandTargetAddrHi = $21
@@ -1720,29 +1798,135 @@ TEST_SLO_1B:
 TEST_SLO_1F:
 	LDA #$1F
 TEST_SLO:
-	JSR TEST_UnOp_Setup 			; Set the opcode
-	; Run a test; TODO, white somethign better here.
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; A lot of these unofficial instruction tests will tell you to "see TEST_SLO" for an explanation. Here it is!
+	
+	; The ASM code in this section might look a little confusing...
+	; These JSR instructions lead to subroutines that modify the return address
+	; so the .word and .byte parts don't get executed.
+	; The format of these tests look like this:	
+	;
+	; JSR TEST_RunTest_AddrInitAXYF
+	; iAddress
+	; iValue, iA,   iX,   iY,   iflags
+	; rAddress
+	; rValue, rA,   rX,   rY,   rflags
+	;
+	; The address at "iAddress" will be assigned the value of "iValue". 
+	; The A register will be assigned the value of iA, the X register will be assigned the value of iX, and so on.
+	; Then the test runs, which is pretty much just running the instruction in question. In this case, it's some form of SLO.
+	; Then, the value of rAddress is compared with rValue. (If it doesn't match, return error code 1)
+	; Then, the value of the A register is compared with rA. (If it doesn't match, return error code 2)
+	; Then, the value of the X register is compared with rX. (If it doesn't match, return error code 3)
+	; Then, the value of the Y register is compared with rY. (If it doesn't match, return error code 4)
+	; Then, the value of the status flags are compared with rflags. (If they don't match, return error code 5)
+	
 	JSR TEST_RunTest_AddrInitAXYF
 	.word $0500
-	;    init, A,   X,   Y,   flags
-	.byte $40, $01, $64, $45, (flag_c | flag_z | flag_i)
+	.byte $40, $01, $64, $45, (flag_i | flag_c | flag_z)
 	.word $0500
-	;  result, A,   X,   Y,   flags
 	.byte $80, $81, $64, $45, (flag_i | flag_n)
+	; SLO ;
+	; Let's walk through this one for the sake of documentation.
+	; $0500 = $40, A = $01
+	; SLO will shift the value at $0500 to the left.
+	; $40 << 1 = $80, so that's the new value at $0500
+	; then, bitwise OR the A register with the result of that previous step.
+	; $01 | $80 = $81.
+	; So the result is, $0500 = $80, and A = $81.
+	; The Negative, Carry, and Zero are the only flags modified, and they behave like ORA in this instance.
+	; So in this case, the negative flag is set, carry is cleared, and zero is cleared.	
 	
-	NOP
-	NOP
-	NOP
-	NOP
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $057F
+	.byte $FF, $00, $21, $9E, (flag_i | flag_v)
+	.word $057F
+	.byte $FE, $FE, $21, $9E, (flag_i | flag_n | flag_c | flag_v)
 	
-	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $05FF
+	.byte $00, $00, $FF, $FF, (flag_i | flag_c)
+	.word $05FF
+	.byte $00, $00, $FF, $FF, (flag_i | flag_z)	
+	; This one really doesn't have any wild edge cases or anything.
+	; it's probably a safe bet to assume if your emulator made it this far, then it's good.	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
 ;;;;;;;
 
+TEST_ANC_0B:
+	LDA #$0B
+	BNE TEST_ANC
+TEST_ANC_2B:
+	LDA #$2B
+TEST_ANC:
+	; see TEST_SLO for an explanation of how these tests work.
+	; Except this one is slightly different, so let me explain.
+	; TEST_RunTest_ImmOperandAXYF is similar to TEST_RunTest_AddrInitAXYF,
+	; but instead of iAddress, iValue, iA, iX, iY, iFlags, rAddress, rValue, rA, rX, rY, rFlags
+	; this function uses operand, iA, iX, iY, iFlags, rA, rX, rY, rFlags.
+	; Error code 2 means A didn't match the expected result.
+	; Error code 3 means X didn't match the expected result.
+	; Error code 4 means Y didn't match the expected result.
+	; Error code 5 means the flags didn't match the expected result.
+	JSR TEST_UnOp_Setup ; Set the opcode
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $F0
+	.byte $5A, $64, $45, (flag_i | flag_z | flag_c)
+	.byte $50, $64, $45, (flag_i)
+	; ANC ;
+	; Bitwise AND with Accumulator then Set Carry if Negative
+	; $5A & $F0 = 50	
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $F5
+	.byte $81, $00, $01, (flag_i | flag_v)
+	.byte $81, $00, $01, (flag_i | flag_c | flag_n | flag_v)
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $5A
+	.byte $A5, $FF, $5A, (flag_i | flag_c)
+	.byte $00, $FF, $5A, (flag_i | flag_z)	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;	
+	
+TEST_ASR_4B:
+	LDA #$4B
+	JSR TEST_UnOp_Setup ; Set the opcode
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $F0
+	.byte $81, $64, $45, (flag_i | flag_z | flag_c)
+	.byte $40, $64, $45, (flag_i)
+	; ASR ;
+	; Bitwise AND with Accumulator then Logical Shift Right Accumulator
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $52
+	.byte $43, $00, $01, (flag_i | flag_c | flag_v)
+	.byte $21, $00, $01, (flag_i | flag_v)
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $41
+	.byte $BF, $55, $AA, (flag_i | flag_z | flag_c)
+	.byte $00, $55, $AA, (flag_i | flag_z | flag_c)
+	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
 
-
+TEST_ARR_6B:
+TEST_ANE_8B:
+TEST_LXA_AB:
+TEST_AXS_CB:
+TEST_SBC_EB:
+	LDA #02
+	RTS
 
 
 
@@ -2636,7 +2820,6 @@ RunTest:
 	                              ; The A Register holds the results of the test.
 	LDY #0
 	STA [TestResultPointer],Y     ; store the test results in RAM.
-	JSR ResetScroll				  ; Some tests might update the scroll and not change it back, so let's do this here.
 	JSR WaitForVBlank		      ; and wait for VBlank before updating the "...." text with the results.
 	LDX <menuCursorYPos		      ; load X for the upcoming subroutines.
 	JSR DrawTEST			      ; draw "PASS" or "FAIL x"
@@ -2798,9 +2981,24 @@ ClearNametableFrom2240:
 	STA $2006
 	LDA #$40
 	STA $2006
-	LDX #0
+	LDX #$10
 	LDA #$24
 ClearNTFrom2240Loop:
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
 	STA $2007
 	DEX
 	BNE ClearNTFrom2240Loop
