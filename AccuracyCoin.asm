@@ -121,7 +121,7 @@ result_UnOp_ANE_8B	= $414
 result_UnOp_LXA_AB	= $415
 result_UnOp_AXS_CB	= $416
 result_UnOp_SBC_EB	= $417
-
+result_UnOp_Magic = $418
 
 
 
@@ -317,6 +317,7 @@ Suite_UnofficialOps_Immediates:
 	table "$AB   LXA Immediate", $FF, result_UnOp_LXA_AB, TEST_LXA_AB
 	table "$CB   AXS Immediate", $FF, result_UnOp_AXS_CB, TEST_AXS_CB
 	table "$EB   SBC Immediate", $FF, result_UnOp_SBC_EB, TEST_SBC_EB
+	table "Print magic constant", $FF, result_UnOp_Magic, TEST_MAGIC
 	.byte $FF
 	
 	
@@ -1913,14 +1914,40 @@ TEST_ASR_4B:
 	JSR TEST_RunTest_ImmOperandAXYF
 	.byte $41
 	.byte $BF, $55, $AA, (flag_i | flag_z | flag_c)
-	.byte $00, $55, $AA, (flag_i | flag_z | flag_c)
-	
+	.byte $00, $55, $AA, (flag_i | flag_z | flag_c)	
 	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
 
 TEST_ARR_6B:
+	LDA #$6B
+	JSR TEST_UnOp_Setup ; Set the opcode
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $F2
+	.byte $EE, $64, $45, (flag_i | flag_z | flag_v)
+	.byte $71, $64, $45, (flag_i | flag_c)
+	; ARR ;
+	; Bitwise AND with A then Rotate A and check bits
+	; Negative flag = bit 7
+	; Carry flag = bit 6
+	; Overflow flag = bit 5
+	; Zero flag = result is zero
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $01
+	.byte $59, $64, $45, (flag_i | flag_z)
+	.byte $00, $64, $45, (flag_i | flag_z)
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $4F
+	.byte $F3, $64, $45, (flag_i | flag_z | flag_c)
+	.byte $A1, $64, $45, (flag_i | flag_v | flag_n)
+	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+
 TEST_ANE_8B:
 TEST_LXA_AB:
 TEST_AXS_CB:
@@ -1928,8 +1955,31 @@ TEST_SBC_EB:
 	LDA #02
 	RTS
 
-
-
+TEST_MAGIC:
+	; The ANE and LXA instructions have "magic constants".
+	; The constant is typically $EE or $FF.
+	; This test just prints what the value is for both instructions.	
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $2330
+	.byte "ANE constant = $", $FF
+	LDA #0
+	LDX #$FF
+	.byte $8B, $FF ; ANE #$FF
+	JSR PrintByte
+	
+	JSR PrintTextCentered
+	.word $2350
+	.byte "LXA constant = $", $FF
+	LDA #0
+	.byte $AB, $FF ; LXA #$FF
+	JSR PrintByte
+	
+;; END OF TEST ;;
+	JSR ResetScroll
+	LDA #1
+	RTS
 
 
 
