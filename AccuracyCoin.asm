@@ -131,6 +131,15 @@ result_UnOp_RLA_37 = $41D
 result_UnOp_RLA_3B = $41E
 result_UnOp_RLA_3F = $41F
 
+result_UnOp_SRE_43 = $420
+result_UnOp_SRE_47 = $421
+result_UnOp_SRE_4F = $422
+result_UnOp_SRE_53 = $423
+result_UnOp_SRE_57 = $424
+result_UnOp_SRE_5B = $425
+result_UnOp_SRE_5F = $426
+
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -282,6 +291,7 @@ TableTable:
 	.word Suite_CPUBehavior
 	.word Suite_UnofficialOps_SLO
 	.word Suite_UnofficialOps_RLA
+	.word Suite_UnofficialOps_SRE
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
@@ -328,6 +338,18 @@ Suite_UnofficialOps_RLA:
 	table "$37   RLA zeropage,X", $FF, result_UnOp_RLA_37, TEST_RLA_37
 	table "$3B   RLA absolute,Y", $FF, result_UnOp_RLA_3B, TEST_RLA_3B
 	table "$3F   RLA absolute,X", $FF, result_UnOp_RLA_3F, TEST_RLA_3F
+	.byte $FF
+	
+		;; Unofficial Instructions: SRE ;;
+Suite_UnofficialOps_SRE:
+	.byte "Unofficial Instructions: SRE", $FF
+	table "$43   SRE indirect,X", $FF, result_UnOp_SRE_43, TEST_SRE_43
+	table "$47   SRE zeropage",   $FF, result_UnOp_SRE_47, TEST_SRE_47
+	table "$4F   SRE absolute",   $FF, result_UnOp_SRE_4F, TEST_SRE_4F
+	table "$53   SRE indirect,Y", $FF, result_UnOp_SRE_53, TEST_SRE_53
+	table "$57   SRE zeropage,X", $FF, result_UnOp_SRE_57, TEST_SRE_57
+	table "$5B   SRE absolute,Y", $FF, result_UnOp_SRE_5B, TEST_SRE_5B
+	table "$5F   SRE absolute,X", $FF, result_UnOp_SRE_5F, TEST_SRE_5F
 	.byte $FF
 	
 	;; Unofficial Instructions: The Immediate group ;;
@@ -1944,6 +1966,64 @@ TEST_RLA:
 	LDA #1
 	RTS
 ;;;;;;;
+
+TEST_SRE_43:
+	LDA #$43
+	BNE TEST_SRE
+TEST_SRE_47:
+	LDA #$47
+	BNE TEST_SRE
+TEST_SRE_4F:
+	LDA #$4F
+	BNE TEST_SRE
+TEST_SRE_53:
+	LDA #$53
+	BNE TEST_SRE
+TEST_SRE_57:
+	LDA #$57
+	BNE TEST_SRE
+TEST_SRE_5B:
+	LDA #$5B
+	BNE TEST_SRE
+TEST_SRE_5F:
+	LDA #$5F
+TEST_SRE:
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; see TEST_SLO for an explanation of the format here.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $F0
+	.byte $5A, $64, $45, (flag_i | flag_c | flag_z)
+	.word $0500
+	.byte $78
+	.byte $22, $64, $45, (flag_i)
+	; SRE ;
+	; LSR, then EOR ;
+
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $48
+	.byte $24, $8C, $8D, (flag_i | flag_v)
+	.word $0500
+	.byte $24
+	.byte $00, $8C, $8D, (flag_i | flag_v | flag_z)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $01
+	.byte $00, $00, $00, (flag_i)
+	.word $0500
+	.byte $00
+	.byte $00, $00, $00, (flag_i | flag_c | flag_z)
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+
 
 TEST_ANC_0B:
 	LDA #$0B
