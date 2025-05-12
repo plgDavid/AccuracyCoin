@@ -225,6 +225,9 @@ PostResetFlagTest:
 	LDA #$60
 	STA <JSRFromRAM3
 	
+	LDA #0
+	STA $100 ; initialize the placeholder test results.
+	
 	LDA #$FF
 	STA <menuCursorYPos
 	
@@ -317,7 +320,7 @@ Suite_UnofficialOps_Immediates:
 	table "$AB   LXA Immediate", $FF, result_UnOp_LXA_AB, TEST_LXA_AB
 	table "$CB   AXS Immediate", $FF, result_UnOp_AXS_CB, TEST_AXS_CB
 	table "$EB   SBC Immediate", $FF, result_UnOp_SBC_EB, TEST_SBC_EB
-	table "Print magic constant", $FF, result_UnOp_Magic, TEST_MAGIC
+	table "Print magic constants", $FF, result_UnOp_Magic, TEST_MAGIC
 	.byte $FF
 	
 	
@@ -1950,7 +1953,39 @@ TEST_ARR_6B:
 
 TEST_ANE_8B:
 TEST_LXA_AB:
+	;; END OF TEST ;;
+	LDA #2
+	RTS
 TEST_AXS_CB:
+	LDA #$CB
+	JSR TEST_UnOp_Setup ; Set the opcode
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $10
+	.byte $F0, $B0, $45, (flag_i | flag_z | flag_c)
+	.byte $F0, $A0, $45, (flag_i | flag_c | flag_n)
+	; AXS ;
+	; X = (A&X) - Immediate
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $00
+	.byte $5A, $CC, $FF, (flag_i | flag_z | flag_c)
+	.byte $5A, $48, $FF, (flag_i | flag_c)
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $E5
+	.byte $00, $66, $45, (flag_i | flag_z | flag_c | flag_v)
+	.byte $00, $1B, $45, (flag_i | flag_v)
+	
+	JSR TEST_RunTest_ImmOperandAXYF
+	.byte $45
+	.byte $C5, $5F, $00, (flag_i | flag_n)
+	.byte $C5, $00, $00, (flag_i | flag_z | flag_c)
+	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+
 TEST_SBC_EB:
 	LDA #02
 	RTS
