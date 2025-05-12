@@ -139,6 +139,13 @@ result_UnOp_SRE_57 = $424
 result_UnOp_SRE_5B = $425
 result_UnOp_SRE_5F = $426
 
+result_UnOp_RRA_63 = $427
+result_UnOp_RRA_67 = $428
+result_UnOp_RRA_6F = $429
+result_UnOp_RRA_73 = $42A
+result_UnOp_RRA_77 = $42B
+result_UnOp_RRA_7B = $42C
+result_UnOp_RRA_7F = $42D
 
 
 result_PowOn_CPURAM = $0480
@@ -292,6 +299,7 @@ TableTable:
 	.word Suite_UnofficialOps_SLO
 	.word Suite_UnofficialOps_RLA
 	.word Suite_UnofficialOps_SRE
+	.word Suite_UnofficialOps_RRA
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
@@ -350,6 +358,18 @@ Suite_UnofficialOps_SRE:
 	table "$57   SRE zeropage,X", $FF, result_UnOp_SRE_57, TEST_SRE_57
 	table "$5B   SRE absolute,Y", $FF, result_UnOp_SRE_5B, TEST_SRE_5B
 	table "$5F   SRE absolute,X", $FF, result_UnOp_SRE_5F, TEST_SRE_5F
+	.byte $FF
+	
+		;; Unofficial Instructions: RRA ;;
+Suite_UnofficialOps_RRA:
+	.byte "Unofficial Instructions: RRA", $FF
+	table "$63   RRA indirect,X", $FF, result_UnOp_RRA_63, TEST_RRA_63
+	table "$67   RRA zeropage",   $FF, result_UnOp_RRA_67, TEST_RRA_67
+	table "$6F   RRA absolute",   $FF, result_UnOp_RRA_6F, TEST_RRA_6F
+	table "$73   RRA indirect,Y", $FF, result_UnOp_RRA_73, TEST_RRA_73
+	table "$77   RRA zeropage,X", $FF, result_UnOp_RRA_77, TEST_RRA_77
+	table "$7B   RRA absolute,Y", $FF, result_UnOp_RRA_7B, TEST_RRA_7B
+	table "$7F   RRA absolute,X", $FF, result_UnOp_RRA_7F, TEST_RRA_7F
 	.byte $FF
 	
 	;; Unofficial Instructions: The Immediate group ;;
@@ -2003,18 +2023,18 @@ TEST_SRE:
 	; LSR, then EOR ;
 
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $0500
+	.word $053A
 	.byte $48
 	.byte $24, $8C, $8D, (flag_i | flag_v)
-	.word $0500
+	.word $053A
 	.byte $24
 	.byte $00, $8C, $8D, (flag_i | flag_v | flag_z)
 	
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $0500
+	.word $05B1
 	.byte $01
 	.byte $00, $00, $00, (flag_i)
-	.word $0500
+	.word $05B1
 	.byte $00
 	.byte $00, $00, $00, (flag_i | flag_c | flag_z)
 
@@ -2023,6 +2043,64 @@ TEST_SRE:
 	RTS
 ;;;;;;;
 
+TEST_RRA_63:
+	LDA #$63
+	BNE TEST_RRA
+TEST_RRA_67:
+	LDA #$67
+	BNE TEST_RRA
+TEST_RRA_6F:
+	LDA #$6F
+	BNE TEST_RRA
+TEST_RRA_73:
+	LDA #$73
+	BNE TEST_RRA
+TEST_RRA_77:
+	LDA #$77
+	BNE TEST_RRA
+TEST_RRA_7B:
+	LDA #$7B
+	BNE TEST_RRA
+TEST_RRA_7F:
+	LDA #$7F
+TEST_RRA:
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; see TEST_SLO for an explanation of the format here.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $D0
+	.byte $07, $64, $45, (flag_i | flag_c | flag_z)
+	.word $0500
+	.byte $E8
+	.byte $EF, $64, $45, (flag_i | flag_n)
+	; RRA ;
+	; ROR, then ADC ;
+	; Notably, the ROR behavior updates the carry flag before the ADC.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0566
+	.byte $11
+	.byte $F7, $12, $34, (flag_i | flag_z | flag_v)
+	.word $0566
+	.byte $08
+	.byte $00, $12, $34, (flag_i | flag_z | flag_c)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $05E1
+	.byte $20
+	.byte $90, $7B, $F2, (flag_i | flag_z | flag_c)
+	.word $05E1
+	.byte $90
+	.byte $20, $7B, $F2, (flag_i | flag_v | flag_c)
+
+
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
 
 
 TEST_ANC_0B:
