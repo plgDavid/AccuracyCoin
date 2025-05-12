@@ -158,7 +158,13 @@ result_UnOp_LAX_B3 = $435
 result_UnOp_LAX_B7 = $436
 result_UnOp_LAX_BF = $437
 
-
+result_UnOp_DCP_C3 = $438
+result_UnOp_DCP_C7 = $439
+result_UnOp_DCP_CF = $43A
+result_UnOp_DCP_D3 = $43B
+result_UnOp_DCP_D7 = $43C
+result_UnOp_DCP_DB = $43D
+result_UnOp_DCP_DF = $43E
 
 
 
@@ -301,7 +307,7 @@ InfiniteLoop:
 	
 
 	
-	.org $9000
+	.org $8100
 	; Menu Data
 
 table .macro
@@ -318,6 +324,7 @@ TableTable:
 	.word Suite_UnofficialOps_SRE
 	.word Suite_UnofficialOps_RRA
 	.word Suite_UnofficialOps__AX
+	.word Suite_UnofficialOps_DCP
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
@@ -397,13 +404,24 @@ Suite_UnofficialOps__AX:
 	table "$87   SAX zeropage",   $FF, result_UnOp_SAX_87, TEST_SAX_87
 	table "$8F   SAX absolute",   $FF, result_UnOp_SAX_8F, TEST_SAX_8F
 	table "$97   SAX zeropage,Y", $FF, result_UnOp_SAX_9F, TEST_SAX_97
-
 	table "$A3   LAX indirect,X", $FF, result_UnOp_LAX_A3, TEST_LAX_A3
 	table "$A7   LAX zeropage",   $FF, result_UnOp_LAX_A7, TEST_LAX_A7
 	table "$AF   LAX absolute",   $FF, result_UnOp_LAX_AF, TEST_LAX_AF
 	table "$B3   LAX indirect,Y", $FF, result_UnOp_LAX_B3, TEST_LAX_B3
 	table "$B7   LAX zeropage,X", $FF, result_UnOp_LAX_B7, TEST_LAX_B7
 	table "$BF   LAX absolute,X", $FF, result_UnOp_LAX_BF, TEST_LAX_BF
+	.byte $FF
+	
+	;; Unofficial Instructions: DCP ;;
+Suite_UnofficialOps_DCP:
+	.byte "Unofficial Instructions: DCP", $FF
+	table "$C3   DCP indirect,X", $FF, result_UnOp_DCP_C3, TEST_DCP_C3
+	table "$C7   DCP zeropage",   $FF, result_UnOp_DCP_C7, TEST_DCP_C7
+	table "$CF   DCP absolute",   $FF, result_UnOp_DCP_CF, TEST_DCP_CF
+	table "$C3   DCP indirect,Y", $FF, result_UnOp_DCP_D3, TEST_DCP_D3
+	table "$B7   DCP zeropage,X", $FF, result_UnOp_DCP_D7, TEST_DCP_D7
+	table "$BB   DCP absolute,Y", $FF, result_UnOp_DCP_DB, TEST_DCP_DB
+	table "$BF   DCP absolute,X", $FF, result_UnOp_DCP_DF, TEST_DCP_DF
 	.byte $FF
 	
 	;; Unofficial Instructions: The Immediate group ;;
@@ -419,7 +437,6 @@ Suite_UnofficialOps_Immediates:
 	table "$EB   SBC Immediate", $FF, result_UnOp_SBC_EB, TEST_SBC_EB
 	table "Print magic constants", $FF, result_UnOp_Magic, TEST_MAGIC
 	.byte $FF
-	
 	
 	
 	;; CPU Interrupts ;;
@@ -2171,10 +2188,10 @@ TEST_SAX:
 	.byte $5A, $A5, $45, (flag_i)
 	
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $05D2
+	.word $05EC
 	.byte $21
 	.byte $90, $E0, $45, (flag_i | flag_c)
-	.word $05D2
+	.word $05EC
 	.byte $80
 	.byte $90, $E0, $45, (flag_i | flag_c)
 
@@ -2216,10 +2233,10 @@ TEST_LAX:
 	; Load A and X ;
 
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $0500
+	.word $05B3
 	.byte $9F
 	.byte $00, $00, $88, (flag_i | flag_z)
-	.word $0500
+	.word $05B3
 	.byte $9F
 	.byte $9F, $9F, $88, (flag_i | flag_n)
 
@@ -2228,7 +2245,62 @@ TEST_LAX:
 	RTS
 ;;;;;;;
 
+TEST_DCP_C3:
+	LDA #$C3
+	BNE TEST_DCP
+TEST_DCP_C7:
+	LDA #$C7
+	BNE TEST_DCP
+TEST_DCP_CF:
+	LDA #$CF
+	BNE TEST_DCP
+TEST_DCP_D3:
+	LDA #$D3
+	BNE TEST_DCP
+TEST_DCP_D7:
+	LDA #$D7
+	BNE TEST_DCP
+TEST_DCP_DB:
+	LDA #$DB
+	BNE TEST_DCP
+TEST_DCP_DF:
+	LDA #$DF
+TEST_DCP:
+	JSR TEST_UnOp_Setup; Set the opcode
+	
+	; see TEST_SLO for an explanation of the format here.
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $F5
+	.byte $F4, $64, $45, (flag_i)
+	.word $0500
+	.byte $F4
+	.byte $F4, $64, $45, (flag_i | flag_c | flag_z)
+	; DCP ;
+	; DEC, then  CMP ;
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $00
+	.byte $F2, $00, $11, (flag_i)
+	.word $0500
+	.byte $FF
+	.byte $F2, $00, $11, (flag_i | flag_n)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $80
+	.byte $80, $8F, $E3, (flag_i)
+	.word $0500
+	.byte $7F
+	.byte $80, $8F, $E3, (flag_i | flag_c)
+	
 
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
 
 
 
