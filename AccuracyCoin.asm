@@ -229,6 +229,8 @@ RESET_SkipPowerOnTests
 	CLD
 	LDX #$FF
 	TXS
+	LDA #$40
+	STA $4017
 TEST_PPUResetFlag:
 	;;; Test 1 [PPU Reset Flag]: Are PPU Registers writable before the first pre-render line? ;;;
 	; They shouldn't be, as that's the job of the PPU Reset Flag!
@@ -1507,6 +1509,9 @@ TEST_Fail6:	; This is in the middle of the test, since it saves bytes to branch 
 ;;;;;;;;;;;;;;;;;
 
 TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $580
+	NOP	; These can be replaced with a JSR instruction.
+	NOP	; Certain operations have different behavior if a DMA occurs in the 2nd to last cycle.
+	NOP	; So those instructions might put a JSR here to set things up and precisely time time a DMA. 
 	STX <Copy_X
 	TSX			; Some unofficial instructions modify the stack pointer
 	STX <Copy_SP; make a copy of the stack pointer
@@ -2435,19 +2440,33 @@ TEST_SHA:
 	; $510 = A & X & H
 	;	   = $0D & $15 & $1F
 	;	   = 5
-	INC <$55 ; make this non-zero for the test.	
+	PHA
+	LDA #$5A
+	STA <$55 ; make this non-zero for the test.	
+	PLA
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $0555 ; $0402 will be the operand.
+	.word $0555 ; $0456 will be the operand.
 	.byte $FF
-	.byte $F0, $09, $FF, (flag_i)
+	.byte $F0, $08, $FF, (flag_i)
 	.word $0055
 	.byte $00
-	.byte $F0, $09, $FF, (flag_i)
-	; Hi = ($1E+1) & A & X;
+	.byte $F0, $08, $FF, (flag_i)
+	; Hi = ($04+1) & A & X;
 	; 	 = $00
-	; $510 = A & X & H
-	;	   = $0D & $15 & $1F
-	;	   = 5
+	; $0055 = A & X & H
+	;	   = $F0 & $08 & $05
+	;	   = 0
+
+	
+	
+	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
+	LDA #$20
+	STA $0580
+	LDA #Low(DMASync)
+	STA $0581
+	LDA #High(DMASync)
+	STA $0582	
+	JSR DMASync
 	
 ;; END OF TEST ;;
 	LDA #1
@@ -3794,6 +3813,10 @@ SetUpNMIRoutineForMainMenu:
 	STA $702
 	RTS
 ;;;;;;;
+
+DMASync:
+		; TODO
+	RTS	; -6
 
 
 	.bank 3
