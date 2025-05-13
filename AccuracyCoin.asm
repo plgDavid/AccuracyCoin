@@ -181,6 +181,9 @@ result_UnOp_SHY_9C = $449
 result_UnOp_SHX_9E = $44A
 result_UnOp_LAE_BB = $44B
 
+result_DMA_Plus_2007R = $44C
+
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -205,11 +208,10 @@ result_PowOn_PPUReset = $0484
 	.org $8000
 	; The open bus test needs to make sure an inaccurate emulation of open bus will fall into test code, so this function here is a fail condition of the open bus test.
 OpenBusTestFakedOpenBusBehavior:
-	NOP
-	NOP
-	PLA ; remove the return address from the JSR to open bus.
-	PLA
-	JMP TEST_Fail ; and boo womp! The test has failed.
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	; I put 17 $00's here for playing silent DPCM samples.
+	; The 00's double as BRK instructions, which fail the open bus test.
+	
 CannotWriteToROM_01:
 	.byte $01; This value is used in the "Cannot write to ROM" test.
 	
@@ -489,8 +491,8 @@ Suite_CPUInterrupts:
 	
 	;; DMA Tests ;;
 Suite_DMATests:
-	.byte "DMA tests", $FF
-	table "DMA + $2007 Read", $FF, $0100, DebugTest
+	.byte "DMA tests", $FF	
+	table "DMA + $2007 Read", $FF, result_DMA_Plus_2007R, TEST_DMA_Plus_2007R
 	table "DMA + $2007 Write", $FF, $0100, DebugTest
 	table "DMA + $4016 Read", $FF, $0100, DebugTest
 	table "DMC DMA + OAM DMA", $FF, $0100, DebugTest
@@ -2466,7 +2468,7 @@ TEST_SHA:
 	STA $0581
 	LDA #High(DMASync)
 	STA $0582	
-	JSR DMASync
+
 	
 ;; END OF TEST ;;
 	LDA #1
@@ -2716,12 +2718,66 @@ TEST_MAGIC:
 	LDA #1
 	RTS
 
+TEST_DMA_Plus_2007R:
+	; Here's the set up:
+	; VRAM will read 0 1 2 3 4
+	; The LDA $2007 instruction has 4 read cycles.
+	; [Opcode] [Operand1] [Operand2] [Read $2007]
+	; if the DMA occurs between [Operand2] and [Read $2007], the ppu 'v' register will be incremented twice due to the DMA's dummy cycles.
+	JSR WaitForVBlank
+	JSR DisableRendering ; let's disable rendering for this one.
+	LDX #$24
+	STX $2006
+	LDX #0
+	STX $2006
+	STX $2007 ; write 0 to VRAM $2800
+	INX
+	STX $2007 ; write 1 to VRAM $2801
+	INX
+	STX $2007 ; write 2 to VRAM $2802
+	INX
+	STX $2007 ; write 3 to VRAM $2803
+	INX
+	STX $2007 ; write 4 to VRAM $2804
+	LDX #$24
+	STX $2006
+	LDX #$01
+	STX $2006 ; and set 'v' back to $2800
+	LDA $2007 ; read $2007 and prep the buffer.
+	
+	JSR DMASync	; sync DMA
+	; We have 10 CPU cycles until the DMA occurs.
+	LDA <$FF ; 3 cycles
+	NOP ; 2 cycles
+	NOP ; 2 cycles
+	LDA $2007 ; <------- [Opcode] [Operand1] [Operand2] [*DMA*] [Read]
+	NOP 
+	NOP	
+	
+	;;; Test 1 [DMA + $2007 Read]: verify PPU buffer behavior ;;;
+	CMP #$00
+	BEQ TEST_Fail7 ; if the value of A is $00, then your PPU buffer is probably not implemented correctly.
+	INC <currentSubTest
+	
+	;;; Test 2 [DMA + $2007 Read]: Check DMA timing ;;;
+	CMP #$01
+	BEQ TEST_Fail7 ; if the value of A is $01, then the timing of the DMA is off.
+	INC <currentSubTest
+	
+	;;; Test 3 [DMA + $2007 Read]: Check the DMA dummy reads occured the correct number of times ;;;	
+	CMP #$03
+	BMI TEST_Fail7
+	INC <currentSubTest
+	
+	JSR ResetScroll
+	JSR WaitForVBlank
+	JSR EnableRendering	
+	;; END OF TEST ;
+	LDA #1
+	RTS
 
-
-
-
-
-
+TEST_Fail7:
+	JMP TEST_Fail
 
 
 
@@ -3761,6 +3817,8 @@ Clockslide_29780:		;=6
 	RTS					;=29780
 ;;;;;;;
 
+	
+
 ClearNametableFrom2240:
 	LDA #$22
 	STA $2006
@@ -3815,8 +3873,74 @@ SetUpNMIRoutineForMainMenu:
 ;;;;;;;
 
 DMASync:
-		; TODO
-	RTS	; -6
+	LDA #$80
+	STA $4010 ; Enable DMC IRQ
+	LDA #$00
+	STA $4013 ; Length = 0 (+1)
+	STA $4015 ; Disable DMC
+	LDA #$10
+	STA $4015 ; Enable DMC (clear the DMC buffer)
+	NOP
+	STA $4015 ; Enable DMC a second time.
+sync_dmc_loop:
+	BIT $4015
+	BNE sync_dmc_loop ; wait for DMC Interrupt
+	NOP
+	NOP
+	NOP
+	LDA #$E2
+	BNE sync_dmc_first ; branch always to sync_dmc_first
+sync_dmc_wait:
+	LDA #$E3
+sync_dmc_first:
+	NOP
+	NOP
+	NOP
+	NOP
+	SEC
+	SBC #$01
+	BNE sync_dmc_first
+	LDA #$10
+	STA $4015
+	NOP
+	BIT $4015
+	BNE sync_dmc_wait
+	; The DMA is now synced!
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	NOP
+	LDX #$A3
+	LDA #$03
+sync_dmc_loop2:
+	DEX
+	BNE sync_dmc_loop2
+	SEC
+	SBC #$01
+	BNE sync_dmc_loop2
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	LDA #$10
+	STA $4015 ; start DMC
+	LDA #$10
+	STA $4015 ; start DMC again
+	JSR Clockslide_3000
+	JSR Clockslide_100
+	JSR Clockslide_100
+	JSR Clockslide_100
+	JSR Clockslide_100
+	RTS ; You got 16 cycles until the DMA, and this RTS takes 6 of them.
+	; in other words, 10 cycles after this RTS, a DMA will occur.
+
+
+
+
+
+
+
+
+
+
+
 
 
 	.bank 3
