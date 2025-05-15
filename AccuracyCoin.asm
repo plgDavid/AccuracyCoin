@@ -2476,26 +2476,187 @@ TEST_ISC:
 TEST_SHA_93:
 	LDA #PostDMACyclesUntilTestInstruction+5
 	STA <Test_UnOp_CycleDelayPostDMA	
-	LDA #$93
-	BNE TEST_SHA
+	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
+	LDA #$00
+	STA <Test_UnOp_IndirectPointerLo
+	LDA #$1E
+	STA <Test_UnOp_IndirectPointerHi
+	LDA #$02
+	LDX #$FF
+	LDY #$10
+	.byte $93, Test_UnOp_IndirectPointerLo
+	LDA $1E00
+	CMP #$02
+	BEQ TEST_SHA_Behavior2_93_JMP
+	LDA $200
+	CMP #$02
+	BEQ TEST_SHA_Behavior1_93_JMP
+	LDA #$02
+	RTS
+	
+TEST_SHA_Behavior2_93_JMP:
+	JMP TEST_SHA_Behavior2_93
+TEST_SHA_Behavior1_93_JMP:
+	JMP TEST_SHA_Behavior1_93
+	
 TEST_SHA_9F:
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
+	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
+	LDA #$02
+	LDX #$FF
+	LDY #$10
+	.byte $9F, $F0, $1D
+	LDA $1E00
+	CMP #$02
+	BEQ TEST_SHA_Behavior2_9F_JMP
+	LDA $200
+	CMP #$02
+	BEQ TEST_SHA_Behavior1_9F_JMP
+	LDA #$02
+	RTS
+	
+TEST_SHA_Behavior2_9F_JMP:
+	JMP TEST_SHA_Behavior2_9F
+TEST_SHA_Behavior1_9F_JMP:
+	JMP TEST_SHA_Behavior1_9F
+	
+	; So there are 2 different behaviors you can expect here.
+	; H is the high byte of the address bus at the start of the cycle in which the Y register is used as an offset.
+	; 1. Write: A & X & H
+	; 2. Write: A & (X | Magic) & H :: *Magic CAN CHANGE!
+	;		Magic has been seen to be 00, F5, F9, FA, and FF.
+	
+	; When the Y register is used as an offset and causes the high byte to change, the high byte becomes "unstable".
+	; The behavior here IS correlated to the other set of behaviors.
+	; 1. Hi = Hi & A & X
+	; 2. Hi = Hi & X
+TEST_SHA_Behavior1_93
+	LDA #$93
+	BNE TEST_SHA_Behavior1
+TEST_SHA_Behavior1_9F:
 	LDA #$9F
-TEST_SHA:
+TEST_SHA_Behavior1:
 	JSR TEST_UnOp_Setup; Set the opcode
-
-	; TODO: remake the tests for these instructions.
-
+	; This test follows the documented behavior of these instructions. Most emulators probably go here.
+	; Special thanks to 8BitLord64 for help researching this.
+	; Write: A & X & H
+	; Hi = Hi & A & X
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0525
+	.byte $FF
+	.byte $FF, $FF, $00, (flag_i)
+	.word $0525
+	.byte $06
+	.byte $FF, $FF, $00, (flag_i)
+	; SHA ;
+	; This test needs to be VERY carefully made
+	; the high byte of the target address can be modified "unexpectedly"
+	; let's run some tests where the high byte doesn't change.
+	; Store (A & X & H), where "H" is the high byte of the target address + 1.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1D00	; If someone is testing for this instruction, they would surely have RAM mirroring implemented.
+	.byte $FF
+	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v)
+	.word $0500
+	.byte $14
+	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v)
+	
+	; Now to make the high byte go unstable.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1F10 ; $1E90 will be the operand.
+	.byte $FF
+	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v)
+	.word $0510
+	.byte $05
+	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v)
+	; Hi = ($1E+1) & A & X;
+	; 	 = $05
+	; $510 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	INC <$55 ; make this non-zero for the test.	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0555 ; $0402 will be the operand.
+	.byte $FF
+	.byte $F0, $09, $FF, (flag_i)
+	.word $0055
+	.byte $00
+	.byte $F0, $09, $FF, (flag_i)
+	; Hi = ($1E+1) & A & X;
+	; 	 = $00
+	; $510 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	
 	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
-	;LDA #$20
-	;STA $0580
-	;LDA #Low(DMASync)
-	;STA $0581
-	;LDA #High(DMASync)
-	;STA $0582	
-
-	LDA #2
+	; LDA #$20
+	; STA $0580
+	; LDA #Low(DMASync_50MinusACyclesRemaining)
+	; STA $0581
+	; LDA #High(DMASync_50MinusACyclesRemaining)
+	; STA $0582		
+	
+	; TODO: this.
+	
+;; END OF TEST ;;
+	JSR WaitForVBlank
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $22B0
+	.byte "SHA Behavior 1", $FF
+	JSR ResetScroll
+	LDA #1
+	RTS
+	
+TEST_SHA_Behavior2_93
+	LDA #$93
+	BNE TEST_SHA_Behavior2
+TEST_SHA_Behavior2_9F:
+	LDA #$9F
+TEST_SHA_Behavior2:
+	JSR TEST_UnOp_Setup; Set the opcode
+	; This test follows the behavior of many consoles I tested, though differs from the documentation.
+	; Special thanks to GTAce, Fiskbit, and Lain for helping research this.
+	; Write: A & (X | Magic) & H
+	; Hi = Hi & X
+	
+	; We can not make any assumptions on what "magic" is. Therefore, X needs to always be FF.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0525
+	.byte $FF
+	.byte $FF, $FF, $00, (flag_i)
+	.word $0525
+	.byte $06
+	.byte $FF, $FF, $00, (flag_i)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1D00
+	.byte $FF
+	.byte $03, $FF, $00, (flag_i)
+	.word $0500
+	.byte $02
+	.byte $03, $FF, $00, (flag_i)
+	
+	; Now to make the high byte go unstable.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1F10 ; $1E90 will be the operand.
+	.byte $FF
+	.byte $0A, $FF, $80, (flag_i | flag_c | flag_z | flag_v)
+	.word $0710
+	.byte $0A
+	.byte $0A, $FF, $80, (flag_i | flag_c | flag_z | flag_v)
+	; the high byte will only be ANDed with X (FF in this case)
+	
+	JSR WaitForVBlank
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $22B0
+	.byte "SHA Behavior 2", $FF
+	JSR ResetScroll
+	LDA #1
 	RTS
 
 
@@ -3813,6 +3974,8 @@ RunTest:
 	JSR HighlightTest             ; and highlight it, since the cursor is still here.
 	LDA #1
 	STA <currentSubTest           ; set this to 1 before running any tests.
+	LDA #$80
+	STA <Test_UnOp_SP			  ; Some tests might modify the stack pointer. The test will use a value of $80 just to be sure it's not overwriting other stack data.
 	JSR ResetScroll		          ; Reset the scroll before the test, since we just modified 'v' inside the previous subroutines.
 	JSR ClearPage5		          ; clear RAM from $500 to $5FF. That RAM is dedicated for running tests, so we want it clean.
 	JSR WaitForVBlank             ; this makes debugging your own emulator with this ROM much easier, since the test should always begin at the start of a frame.
