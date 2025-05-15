@@ -227,8 +227,8 @@ RESET_SkipPowerOnTests
 
 	SEI
 	CLD
-	LDX #$FF
-	TXS
+	LDX #$EF ; Due to some tests modifying the stack pointer, it's convenient to put it at EF instead of FF.
+	TXS		 ; This prevents some tests where the resulting stack pointer is 00 from pushing data, and overwriting the bottom of the stack.
 	LDA #$40
 	STA $4017
 TEST_PPUResetFlag:
@@ -473,7 +473,7 @@ Suite_UnofficialOps_Immediates:
 	table "$AB   LXA Immediate", $FF, result_UnOp_LXA_AB, TEST_LXA_AB
 	table "$CB   AXS Immediate", $FF, result_UnOp_AXS_CB, TEST_AXS_CB
 	table "$EB   SBC Immediate", $FF, result_UnOp_SBC_EB, TEST_SBC_EB
-	table "Print magic constants", $FF, result_UnOp_Magic, TEST_MAGIC
+	table "Print magic values", $FF, result_UnOp_Magic, TEST_MAGIC
 	.byte $FF
 	
 	
@@ -2477,9 +2477,9 @@ TEST_SHA_93:
 	LDA #PostDMACyclesUntilTestInstruction+5
 	STA <Test_UnOp_CycleDelayPostDMA	
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
-	LDA #$00
+	LDA #$F0
 	STA <Test_UnOp_IndirectPointerLo
-	LDA #$1E
+	LDA #$1D
 	STA <Test_UnOp_IndirectPointerHi
 	LDA #$02
 	LDX #$FF
@@ -2605,7 +2605,7 @@ TEST_SHA_Behavior1:
 	STA <dontSetPointer
 	JSR PrintTextCentered
 	.word $22B0
-	.byte "SHA Behavior 1", $FF
+	.byte " SHA Behavior 1", $FF
 	JSR ResetScroll
 	LDA #1
 	RTS
@@ -2649,12 +2649,30 @@ TEST_SHA_Behavior2:
 	.byte $0A, $FF, $80, (flag_i | flag_c | flag_z | flag_v)
 	; the high byte will only be ANDed with X (FF in this case)
 	
+	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
+	; LDA #$20
+	; STA $0580
+	; LDA #Low(DMASync_50MinusACyclesRemaining)
+	; STA $0581
+	; LDA #High(DMASync_50MinusACyclesRemaining)
+	; STA $0582	
+	
 	JSR WaitForVBlank
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
 	.word $22B0
-	.byte "SHA Behavior 2", $FF
+	.byte " SHA Behavior 2", $FF
+	JSR PrintTextCentered
+	.word $2330
+	.byte "SHA magic = $", $FF
+	LDA #$FF
+	LDX #$00
+	LDY #$60
+	.byte $9F, $F0, $FE ; SHA $FEF0, Y
+	LDA <$50
+	JSR PrintByte
+	
 	JSR ResetScroll
 	LDA #1
 	RTS
@@ -2795,8 +2813,10 @@ TEST_LAE_BB:
 	.byte $AB, $CD, $EF, (flag_i | flag_c | flag_n), $90
 	.word $5C3
 	.byte $04
-	.byte $00, $00, $EF, (flag_i | flag_c | flag_z), $00
-
+	.byte $00, $00, $EF, (flag_i | flag_c | flag_z), $00 ;
+	; NOTE: Yes, the stack pointer will be set to 00;
+	;       Yes, the test will then PHA and PHP.
+	;       No, this will not corrupt the bottom of the stack, for the stack pointer is initialized to $EF during the reset routine I wrote.
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -3012,14 +3032,14 @@ TEST_SBC_EB:
 	RTS
 
 TEST_MAGIC:
-	; The ANE and LXA instructions have "magic constants".
-	; The constant is typically $EE or $FF.
+	; The ANE and LXA instructions have "magic values".
+	; The value is typically $EE or $FF.
 	; This test just prints what the value is for both instructions.	
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
 	.word $2330
-	.byte "ANE constant = $", $FF
+	.byte "ANE magic = $", $FF
 	LDA #0
 	LDX #$FF
 	.byte $8B, $FF ; ANE #$FF
@@ -3027,7 +3047,7 @@ TEST_MAGIC:
 	
 	JSR PrintTextCentered
 	.word $2350
-	.byte "LXA constant = $", $FF
+	.byte "LXA magic = $", $FF
 	LDA #0
 	.byte $AB, $FF ; LXA #$FF
 	JSR PrintByte
@@ -3225,6 +3245,7 @@ ClearPage5: ; Page 5 is reserved for RAM used by tests. It's a good idea to clea
 	LDX #0
 ClearPage5Loop:
 	STA $500,X
+	STA $600,X ; it also clears page 6.
 	INX
 	BNE ClearPage5Loop
 	RTS
