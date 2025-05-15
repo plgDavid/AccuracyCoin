@@ -61,6 +61,8 @@ Test_UnOp_CM_Flags = $2E
 Test_UnOp_CPS = $2F
 Test_UnOp_IndirectPointerLo = $30
 Test_UnOp_IndirectPointerHi = $31
+Test_UnOp_CycleDelayPostDMA = $32
+PostDMACyclesUntilTestInstruction = 22
 
 
 Test_ZeroPageReserved = $50 ; through $5F
@@ -191,10 +193,6 @@ result_PowOn_PPURAM = $0482
 result_PowOn_PPUPal = $0483
 result_PowOn_PPUReset = $0484
 
-
-
-;TEST_Unofficial_Operand = $580+(TEST_UnOp_RAMFunctionTest-TEST_UnOp_RAMFunction)+1
-;TEST_Unofficial_Operand2 = $580+(TEST_UnOp_RAMFunctionTest-TEST_UnOp_RAMFunction)+2
 
 
 
@@ -447,7 +445,7 @@ Suite_UnofficialOps_ISC:
 	table "$E3   ISC indirect,X", $FF, result_UnOp_ISC_E3, TEST_ISC_E3
 	table "$E7   ISC zeropage",   $FF, result_UnOp_ISC_E7, TEST_ISC_E7
 	table "$EF   ISC absolute",   $FF, result_UnOp_ISC_EF, TEST_ISC_EF
-	table "$E3   ISC indirect,Y", $FF, result_UnOp_ISC_F3, TEST_ISC_F3
+	table "$F3   ISC indirect,Y", $FF, result_UnOp_ISC_F3, TEST_ISC_F3
 	table "$F7   ISC zeropage,X", $FF, result_UnOp_ISC_F7, TEST_ISC_F7
 	table "$FB   ISC absolute,Y", $FF, result_UnOp_ISC_FB, TEST_ISC_FB
 	table "$FF   ISC absolute,X", $FF, result_UnOp_ISC_FF, TEST_ISC_FF
@@ -1510,18 +1508,16 @@ TEST_Fail6:	; This is in the middle of the test, since it saves bytes to branch 
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
 
-TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $580
+TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $0580
 	NOP	; These can be replaced with a JSR instruction.
 	NOP	; Certain operations have different behavior if a DMA occurs in the 2nd to last cycle.
 	NOP	; So those instructions might put a JSR here to set things up and precisely time time a DMA. 
-	STX <Copy_X
 	TSX			; Some unofficial instructions modify the stack pointer
 	STX <Copy_SP; make a copy of the stack pointer
 	LDX <Copy_X ; restore X for the test.
-	STA <Copy_A
 	LDA <Test_UnOp_FlagsInit
 	PHA
-	LDA <Copy_A
+	LDA <Copy_A	
 	PLP	; Get init flags ready for the test. The T flag isn't a concern.
 TEST_UnOp_RamFuncTest: ; Ram Function TEST
 	NOP	; Overwrite this with the test.
@@ -1535,6 +1531,7 @@ TEST_UnOp_RamFuncTest: ; Ram Function TEST
 	PLA
 	STA <Copy_A  ; Store A
 	STX <Copy_X	 ; Store X
+	TSX
 	STX <Copy_SP2; Store Stack Pointer
 	STY <Copy_Y	 ; Store Y
 	LDX <Copy_SP; Fix the stack pointer in case it was modified.
@@ -1613,7 +1610,7 @@ Test_UnOp_SetupJumpTable:
 	.word TEST_UnOp_SetupAddrMode_Immediate  ; 0 - Immediate
 	.word TEST_Fail							 ; 1 - N/A
 	.word TEST_UnOp_SetupAddrMode_Immediate  ; 2 - Immediate
-	.word TEST_UnOp_SetupAddrMode_IndX  ; 3 - (Indirect, X)
+	.word TEST_UnOp_SetupAddrMode_IndX  	 ; 3 - (Indirect, X)
 	.word TEST_UnOp_SetupAddrMode_ZP 		 ; 4 - ZeroPage
 	.word TEST_Fail							 ; 5 - N/A
 	.word TEST_Fail							 ; 6 - N/A
@@ -1629,7 +1626,7 @@ Test_UnOp_SetupJumpTable:
 	.word TEST_Fail							 ; 10- N/A
 	.word TEST_Fail							 ; 11- N/A
 	.word TEST_Fail							 ; 12- N/A (HLT is tested elsewhere)
-	.word TEST_UnOp_SetupAddrMode_IndY  ; 13- (Indirect), Y
+	.word TEST_UnOp_SetupAddrMode_IndY  	 ; 13- (Indirect), Y
 	.word TEST_UnOp_SetupAddrMode_ZPX		 ; 14- ZeroPage, X
 	.word TEST_Fail							 ; 15- N/A
 	.word TEST_UnOp_SetupAddrMode_ZPY		 ; 16- ZeroPage, Y !! Not always the case for the official instructions, but it's convenient for this jump table.
@@ -1813,6 +1810,8 @@ TEST_UnOpRunTest:
 	LDA <$FF ; the opcode
 	JSR TEST_UnOp_SetupByAddressingMode ; Set up the operands around $580
 	JSR TEST_PrepAXYForTest
+	STA <Copy_A
+	STX <Copy_X
 	JSR $0580	; Run the test!
 	RTS
 ;;;;;;;
@@ -1841,6 +1840,20 @@ Test_UnOpEvaluateResults_StartA:
 	BNE FAIL_UnOpTest ; Error code 5: The result of the flags were incorrect
 	RTS ; Pass!
 FAIL_UnOpTest:
+	; Uncomment this to print the value that failed, and the expected value. Really only works for error 1.
+	;PHA
+	;JSR WaitForVBlank
+	;LDA #$23
+	;STA $2006
+	;LDA #$70
+	;STA $2006
+	;PLA
+	;JSR PrintByte
+	;LDA #$24
+	;STA $2007
+	;LDA <Test_UnOp_ValueAtAddressResult
+	;JSR PrintByte
+
 	PLA	; Pull of the Return Address
 	PLA	;
 	PLA
@@ -2403,81 +2416,88 @@ TEST_ISC:
 
 
 TEST_SHA_93:
+	LDA #PostDMACyclesUntilTestInstruction+5
+	STA <Test_UnOp_CycleDelayPostDMA	
 	LDA #$93
 	BNE TEST_SHA
 TEST_SHA_9F:
+	LDA #PostDMACyclesUntilTestInstruction+4
+	STA <Test_UnOp_CycleDelayPostDMA
 	LDA #$9F
 TEST_SHA:
 	JSR TEST_UnOp_Setup; Set the opcode
-	JSR TEST_RunTest_AddrInitAXYF
-	.word $0525
-	.byte $FF
-	.byte $FF, $FF, $00, (flag_i)
-	.word $0525
-	.byte $06
-	.byte $FF, $FF, $00, (flag_i)
-	; SHA ;
-	; This test needs to be VERY carefully made
-	; the high byte of the target address can be modified "unexpectedly"
-	; let's run some tests where the high byte doesn't change.
-	; Store (A & X & H), where "H" is the high byte of the target address + 1.
-	JSR TEST_RunTest_AddrInitAXYF
-	.word $1D00	; If someone is testing for this instruction, they would surely have RAM mirroring implemented.
-	.byte $FF
-	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v)
-	.word $0500
-	.byte $14
-	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v)
-	
-	; Now to make the high byte go unstable.
-	JSR TEST_RunTest_AddrInitAXYF
-	.word $1F10 ; $1E90 will be the operand.
-	.byte $FF
-	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v)
-	.word $0510
-	.byte $05
-	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v)
-	; Hi = ($1E+1) & A & X;
-	; 	 = $05
-	; $510 = A & X & H
-	;	   = $0D & $15 & $1F
-	;	   = 5
-	PHA
-	LDA #$5A
-	STA <$55 ; make this non-zero for the test.	
-	PLA
-	JSR TEST_RunTest_AddrInitAXYF
-	.word $0555 ; $0456 will be the operand.
-	.byte $FF
-	.byte $F0, $08, $FF, (flag_i)
-	.word $0055
-	.byte $00
-	.byte $F0, $08, $FF, (flag_i)
-	; Hi = ($04+1) & A & X;
-	; 	 = $00
-	; $0055 = A & X & H
-	;	   = $F0 & $08 & $05
-	;	   = 0
 
-	
-	
+	; TODO: remake the tests for these instructions.
+
 	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
-	LDA #$20
-	STA $0580
-	LDA #Low(DMASync)
-	STA $0581
-	LDA #High(DMASync)
-	STA $0582	
+	;LDA #$20
+	;STA $0580
+	;LDA #Low(DMASync)
+	;STA $0581
+	;LDA #High(DMASync)
+	;STA $0582	
 
-	
-;; END OF TEST ;;
-	LDA #1
+	LDA #2
 	RTS
 
 
 TEST_SHS_9B:
 TEST_SHY_9C:
+	LDA #2
+	RTS
 TEST_SHX_9E:
+	LDA #PostDMACyclesUntilTestInstruction+4
+	STA <Test_UnOp_CycleDelayPostDMA
+	LDA #$9E
+	JSR TEST_UnOp_Setup; Set the opcode
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $15BB
+	.byte $7F
+	.byte $00, $FF, $00, (flag_i)
+	.word $15BB
+	.byte $16
+	.byte $00, $FF, $00, (flag_i)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1D00
+	.byte $7F
+	.byte $00, $0F, $00, (flag_i)
+	.word $1D00
+	.byte $0E
+	.byte $00, $0F, $00, (flag_i)
+
+	; Goes unstable.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1F10
+	.byte $7F
+	.byte $00, $05, $80, (flag_i)
+	.word $510
+	.byte $05
+	.byte $00, $05, $80, (flag_i)
+
+	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
+	LDA #$20
+	STA $0580
+	LDA #Low(DMASync_50MinusACyclesRemaining)
+	STA $0581
+	LDA #High(DMASync_50MinusACyclesRemaining)
+	STA $0582	
+	
+	;JSR TEST_RunTest_AddrInitAXYF
+	;.word $0550
+	;.byte $7F
+	;.byte $00, $5A, $00, (flag_i)
+	;.word $0550
+	;.byte $5A
+	;.byte $00, $5A, $00, (flag_i)
+
+	; I honestly cannot tell if this is still writing somewhere, but it sure isn't where I thought it would be.
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
 TEST_LAE_BB:
 	LDA #2
 	RTS
@@ -2745,11 +2765,9 @@ TEST_DMA_Plus_2007R:
 	STX $2006 ; and set 'v' back to $2800
 	LDA $2007 ; read $2007 and prep the buffer.
 	
-	JSR DMASync	; sync DMA
-	; We have 10 CPU cycles until the DMA occurs.
-	LDA <$FF ; 3 cycles
-	NOP ; 2 cycles
-	NOP ; 2 cycles
+	JSR DMASync_50CyclesRemaining	; sync DMA
+	; We have 50 CPU cycles until the DMA occurs.
+	JSR Clockslide_47
 	LDA $2007 ; <------- [Opcode] [Operand1] [Operand2] [*DMA*] [Read]
 	NOP 
 	NOP	
@@ -2768,15 +2786,18 @@ TEST_DMA_Plus_2007R:
 	CMP #$03
 	BMI TEST_Fail7
 	INC <currentSubTest
+	;; END OF TEST ;;
 	
 	JSR ResetScroll
 	JSR WaitForVBlank
 	JSR EnableRendering	
-	;; END OF TEST ;
 	LDA #1
 	RTS
 
 TEST_Fail7:
+	JSR ResetScroll
+	JSR WaitForVBlank
+	JSR EnableRendering	
 	JMP TEST_Fail
 
 
@@ -3674,6 +3695,139 @@ RunTest:
 	RTS
 ;;;;;;;
 
+ClearNametableFrom2240:
+	LDA #$22
+	STA $2006
+	LDA #$40
+	STA $2006
+	LDX #$10
+	LDA #$24
+ClearNTFrom2240Loop:
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	STA $2007
+	DEX
+	BNE ClearNTFrom2240Loop
+	RTS
+;;;;;;;
+
+PrintByte:
+	PHA
+	AND #$F0
+	LSR A
+	LSR A
+	LSR A
+	LSR A
+	STA $2007
+	PLA
+	AND #$0F
+	STA $2007
+	RTS
+;;;;;;;
+
+SetUpNMIRoutineForMainMenu:
+	LDA #$4C
+	STA $700
+	LDA #Low(NMI_Routine)
+	STA $701
+	LDA #High(NMI_Routine)
+	STA $702
+	RTS
+;;;;;;;
+
+DMASync:
+	LDA #$80
+	STA $4010 ; Enable DMC IRQ
+	LDA #$00
+	STA $4013 ; Length = 0 (+1)
+	STA $4015 ; Disable DMC
+	LDA #$10
+	STA $4015 ; Enable DMC (clear the DMC buffer)
+	NOP
+	STA $4015 ; Enable DMC a second time.
+sync_dmc_loop:
+	BIT $4015
+	BNE sync_dmc_loop ; wait for DMC Interrupt
+	NOP
+	NOP
+	NOP
+	LDA #$E2
+	BNE sync_dmc_first ; branch always to sync_dmc_first
+sync_dmc_wait:
+	LDA #$E3
+sync_dmc_first:
+	NOP
+	NOP
+	NOP
+	NOP
+	SEC
+	SBC #$01
+	BNE sync_dmc_first
+	LDA #$10
+	STA $4015
+	NOP
+	BIT $4015
+	BNE sync_dmc_wait
+	; The DMA is now synced!
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	NOP
+	LDX #$A3
+	LDA #$03
+sync_dmc_loop2:
+	DEX
+	BNE sync_dmc_loop2
+	SEC
+	SBC #$01
+	BNE sync_dmc_loop2
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	LDA #$10
+	STA $4015 ; start DMC
+	LDA #$10
+	STA $4015 ; start DMC again
+	RTS ; You got 3404 cycles until the DMA, and this RTS takes 6 of them.
+	; in other words, 3398 cycles after this RTS, a DMA will occur.
+
+
+DMASync_50CyclesRemaining:
+	JSR DMASync
+	; the DMA is in 3398 cycles;
+	JSR Clockslide_3000
+	JSR Clockslide_100
+	JSR Clockslide_100
+	JSR Clockslide_100
+	LDA #16 ;+2
+	JSR Clockslide36_Plus_A
+	RTS ; 50 cycles after this RTS, a DMA will occur.
+	
+DMASync_50MinusACyclesRemaining:
+	JSR DMASync
+	; the DMA is in 3398 cycles;
+	JSR Clockslide_3000
+	JSR Clockslide_100
+	JSR Clockslide_100
+	JSR Clockslide_50
+	JSR Clockslide_49
+	JSR Clockslide_16 ; there is no clockSlide 13, so...
+	LDA <Test_UnOp_CycleDelayPostDMA ; +3
+	JSR Clockslide36_Plus_A
+	RTS ; 50-A cycles after this RTS, a DMA will occur.
+
+	.org $FF00
 Clockslide:
 	; JSR takes 6 cycles.
 	; The following bytes are labeled with the total cycles until the RTS instruction ends.
@@ -3816,129 +3970,16 @@ Clockslide_29780:		;=6
 	JSR Clockslide_29750;=29774
 	RTS					;=29780
 ;;;;;;;
-
-	
-
-ClearNametableFrom2240:
-	LDA #$22
-	STA $2006
-	LDA #$40
-	STA $2006
-	LDX #$10
-	LDA #$24
-ClearNTFrom2240Loop:
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	STA $2007
-	DEX
-	BNE ClearNTFrom2240Loop
-	RTS
-;;;;;;;
-
-PrintByte:
-	PHA
-	AND #$F0
-	LSR A
-	LSR A
-	LSR A
-	LSR A
-	STA $2007
-	PLA
-	AND #$0F
-	STA $2007
-	RTS
-;;;;;;;
-
-SetUpNMIRoutineForMainMenu:
-	LDA #$4C
-	STA $700
-	LDA #Low(NMI_Routine)
-	STA $701
-	LDA #High(NMI_Routine)
-	STA $702
-	RTS
-;;;;;;;
-
-DMASync:
-	LDA #$80
-	STA $4010 ; Enable DMC IRQ
-	LDA #$00
-	STA $4013 ; Length = 0 (+1)
-	STA $4015 ; Disable DMC
-	LDA #$10
-	STA $4015 ; Enable DMC (clear the DMC buffer)
-	NOP
-	STA $4015 ; Enable DMC a second time.
-sync_dmc_loop:
-	BIT $4015
-	BNE sync_dmc_loop ; wait for DMC Interrupt
-	NOP
-	NOP
-	NOP
-	LDA #$E2
-	BNE sync_dmc_first ; branch always to sync_dmc_first
-sync_dmc_wait:
-	LDA #$E3
-sync_dmc_first:
-	NOP
-	NOP
-	NOP
-	NOP
-	SEC
-	SBC #$01
-	BNE sync_dmc_first
-	LDA #$10
-	STA $4015
-	NOP
-	BIT $4015
-	BNE sync_dmc_wait
-	; The DMA is now synced!
-	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
-	NOP
-	LDX #$A3
-	LDA #$03
-sync_dmc_loop2:
-	DEX
-	BNE sync_dmc_loop2
-	SEC
-	SBC #$01
-	BNE sync_dmc_loop2
-	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
-	LDA #$10
-	STA $4015 ; start DMC
-	LDA #$10
-	STA $4015 ; start DMC again
-	JSR Clockslide_3000
-	JSR Clockslide_100
-	JSR Clockslide_100
-	JSR Clockslide_100
-	JSR Clockslide_100
-	RTS ; You got 16 cycles until the DMA, and this RTS takes 6 of them.
-	; in other words, 10 cycles after this RTS, a DMA will occur.
-
-
-
-
-
-
-
-
-
+Clockslide36_Plus_A:;+6
+	STA <$00	; +3
+	LDX #$FF	; +2
+	STX <$01	; +3
+	LDA #37		; +2
+	SEC			; +2
+	SBC <$00	; +3
+	STA <$00	; +3
+	JMP [$0000]	; 5 + A + 6
+;;;;;;;;;;;;;;; ;
 
 
 
