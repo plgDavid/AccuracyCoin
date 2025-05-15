@@ -62,7 +62,7 @@ Test_UnOp_CPS = $2F
 Test_UnOp_IndirectPointerLo = $30
 Test_UnOp_IndirectPointerHi = $31
 Test_UnOp_CycleDelayPostDMA = $32
-PostDMACyclesUntilTestInstruction = 22
+PostDMACyclesUntilTestInstruction = 17
 
 
 Test_ZeroPageReserved = $50 ; through $5F
@@ -1514,6 +1514,8 @@ TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $0580
 	NOP	; So those instructions might put a JSR here to set things up and precisely time time a DMA. 
 	TSX			; Some unofficial instructions modify the stack pointer
 	STX <Copy_SP; make a copy of the stack pointer
+	LDX <Test_UnOp_SP
+	TXS	
 	LDX <Copy_X ; restore X for the test.
 	LDA <Test_UnOp_FlagsInit
 	PHA
@@ -1859,6 +1861,33 @@ FAIL_UnOpTest:
 	PLA
 	PLA
 	JMP TEST_Fail ; and fail the test.
+	
+Test_UnOpEvaluateResultsIncludingStackPointer:
+	LDY #0
+	LDA [Test_UnOp_ExpectedResultAddrLo],Y
+	CMP <Test_UnOp_ValueAtAddressResult
+	BNE FAIL_UnOpTest ; Error code 1: The result at the expected address was incorrect
+	INC <currentSubTest
+	LDA <Copy_A
+	CMP <Test_UnOp_CMP
+	BNE FAIL_UnOpTest ; Error code 2: The result of the A register was incorrect
+	INC <currentSubTest
+	LDX <Copy_X
+	CPX <Test_UnOp_CPX
+	BNE FAIL_UnOpTest ; Error code 3: The result of the X register was incorrect
+	INC <currentSubTest
+	LDY <Copy_Y
+	CPY <Test_UnOp_CPY
+	BNE FAIL_UnOpTest ; Error code 4: The result of the Y register was incorrect
+	INC <currentSubTest
+	LDA <Copy_Flags
+	CMP <Test_UnOp_CM_Flags
+	BNE FAIL_UnOpTest ; Error code 5: The result of the flags were incorrect
+	INC <currentSubTest
+	LDA <Copy_SP2
+	CMP <Test_UnOp_CPS
+	BNE FAIL_UnOpTest ; Error code 6: The result of the stack pointer was incorrect
+	RTS ; Pass!
 
 TEST_RunTest_AddrInitAXYF:
 	;.word TargetAddress
@@ -1891,6 +1920,35 @@ TEST_AddrInitAXYF_PreLoop2:
 	LDA #1
 	STA <currentSubTest	
 	JSR Test_UnOpEvaluateResults
+	; If you made it this far, we passed this test!
+	; (not necessarily the entire suite, but this specific test, at least)
+	LDA UnOpTest_Opcode ; reset this value before the next test, assuming another one follows
+	RTS
+;;;;;;;
+
+TEST_RunTest_AddrInitAXYFS:
+	;.word TargetAddress
+	;.byte Initial, A, X, Y, Flags, StackPointer
+	;.word ResultAddress
+	;.byte result, r_A, r_X, r_Y, r_Flags, r_StackPointer
+	STA <$FF
+	JSR CopyReturnAddressToByte0
+	LDY #0
+	LDX #0
+TEST_AddrInitAXYFS_PreLoop:
+	LDA [$0000],Y
+	STA <Test_UnOp_OperandTargetAddrLo,X
+	INY
+	INX
+	CPX #16 ; Set up $28 through $2F
+	BNE TEST_AddrInitAXYFS_PreLoop
+	; With the varaibles all set up, let's prep the test:
+	JSR FixRTS
+	JSR TEST_UnOpRunTest
+	; Evaluating the test.
+	LDA #1
+	STA <currentSubTest	
+	JSR Test_UnOpEvaluateResultsIncludingStackPointer
 	; If you made it this far, we passed this test!
 	; (not necessarily the entire suite, but this specific test, at least)
 	LDA UnOpTest_Opcode ; reset this value before the next test, assuming another one follows
@@ -2442,9 +2500,62 @@ TEST_SHA:
 
 
 TEST_SHS_9B:
-TEST_SHY_9C:
 	LDA #2
 	RTS
+
+
+TEST_SHY_9C:
+	LDA #PostDMACyclesUntilTestInstruction+4
+	STA <Test_UnOp_CycleDelayPostDMA
+	LDA #$9C
+	JSR TEST_UnOp_Setup; Set the opcode
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $15BB
+	.byte $7F
+	.byte $11, $00, $FF, (flag_i)
+	.word $15BB
+	.byte $16
+	.byte $11, $00, $FF, (flag_i)
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1D00
+	.byte $7F
+	.byte $33, $00, $0F, (flag_i)
+	.word $1D00
+	.byte $0E
+	.byte $33, $00, $0F, (flag_i)
+
+	; Goes unstable.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $1F10
+	.byte $7F
+	.byte $77, $80, $05, (flag_i)
+	.word $510
+	.byte $05
+	.byte $77, $80, $05, (flag_i)
+
+	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
+	LDA #$20
+	STA $0580
+	LDA #Low(DMASync_50MinusACyclesRemaining)
+	STA $0581
+	LDA #High(DMASync_50MinusACyclesRemaining)
+	STA $0582	
+	
+	;JSR TEST_RunTest_AddrInitAXYF
+	;.word $0550
+	;.byte $7F
+	;.byte $00, $5A, $00, (flag_i)
+	;.word $0550
+	;.byte $5A
+	;.byte $00, $5A, $00, (flag_i)
+
+	; I honestly cannot tell if this is still writing somewhere, but it sure isn't where I thought it would be.
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+
 TEST_SHX_9E:
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
@@ -2453,27 +2564,27 @@ TEST_SHX_9E:
 	JSR TEST_RunTest_AddrInitAXYF
 	.word $15BB
 	.byte $7F
-	.byte $00, $FF, $00, (flag_i)
+	.byte $11, $FF, $00, (flag_i)
 	.word $15BB
 	.byte $16
-	.byte $00, $FF, $00, (flag_i)
+	.byte $11, $FF, $00, (flag_i)
 	
 	JSR TEST_RunTest_AddrInitAXYF
 	.word $1D00
 	.byte $7F
-	.byte $00, $0F, $00, (flag_i)
+	.byte $33, $0F, $00, (flag_i)
 	.word $1D00
 	.byte $0E
-	.byte $00, $0F, $00, (flag_i)
+	.byte $33, $0F, $00, (flag_i)
 
 	; Goes unstable.
 	JSR TEST_RunTest_AddrInitAXYF
 	.word $1F10
 	.byte $7F
-	.byte $00, $05, $80, (flag_i)
+	.byte $77, $05, $80, (flag_i)
 	.word $510
 	.byte $05
-	.byte $00, $05, $80, (flag_i)
+	.byte $77, $05, $80, (flag_i)
 
 	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
 	LDA #$20
@@ -2499,7 +2610,34 @@ TEST_SHX_9E:
 ;;;;;;;
 
 TEST_LAE_BB:
-	LDA #2
+	LDA #$BB
+	JSR TEST_UnOp_Setup; Set the opcode
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $500
+	.byte $5A
+	.byte $11, $FF, $00, (flag_i | flag_v), $CA
+	.word $500
+	.byte $5A
+	.byte $4A, $4A, $00, (flag_i | flag_v), $4A
+
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $5C3
+	.byte $C3
+	.byte $7C, $99, $52, (flag_i), $9A
+	.word $5C3
+	.byte $C3
+	.byte $82, $82, $52, (flag_i | flag_n), $82
+	
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $5C3
+	.byte $04
+	.byte $AB, $CD, $EF, (flag_i | flag_c | flag_n), $90
+	.word $5C3
+	.byte $04
+	.byte $00, $00, $EF, (flag_i | flag_c | flag_z), $00
+
+	;; END OF TEST ;;
+	LDA #1
 	RTS
 ;;;;;;;
 
