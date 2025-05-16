@@ -984,8 +984,46 @@ TEST_DummyWritesPrepLoop:
 	LDY <$FE
 	RTS
 ;;;;;;;
+TEST_PPU_Open_Bus:
+	;;; Test 1 [PPU Open Bus]: Verify PPU Open Bus exists. ;;;
+	; Don't worry, this this is remarkably simple.
+	LDA #$5A
+	STA $2002 ; Address $2002 is read-only. This puts $5A on the ppu bus.
+	LDA #0	  ; clear A for the test.
+	LDA $2000 ; Address $2000 is write-only, so teh value read is the value of the PPU bus. ($5A)
+	CMP #$5A
+	BNE TEST_Fail3
+	;; END OF TEST ;;
+	; TODO: Consider checking every PPU Register instead of just these 2.
+	LDA #01
+	RTS
+;;;;;;;
+TEST_DummyWritePrep_SetUpV:
+	LDA #$25
+	STA $2006
+	LDA #$FA
+	STA $2006
+	RTS
+;;;;;;;
+
+TEST_DummyWritePrep_PPUADDR25FA: ; This exists to save bytes
+	JSR SetPPUADDRFromWord
+	.byte $25, $FA
+	LDA #$25
+	STA $2003 ; Set the PPU Open bus value to 25
+	RTS
+;;;;;;;
+
+TEST_DummyWritePrep_26: ; This exists to save bytes
+	JSR SetPPUADDRFromWord
+	.byte $25, $FA
+	LDA #$26
+	STA $2003 ; Set the PPU Open bus value to 26
+	RTS
+;;;;;;;
+
 TEST_DummyWrites:
-	;;; Test 1 [Dummy Write Cycles]: Read-Modify-Write instruction perform dummy reads. ;;;
+	; Special thanks to bisqwit and blargg for creating a test for dummy writes. (I'm pretty much just doing what they did.)
 	; Consider the ASL instruction.
 	; This is a "Read-Modify-Write" instruction, for it does the following:
 	; Read target address, modify the value, and write it back.
@@ -999,75 +1037,137 @@ TEST_DummyWrites:
 	; 6: Write this new value to $0400.
 	;
 	; Focus on cycle 5. That's the dummy write.
-	; And since writes to $2007 increment the PPU's 'v' register, we can test for dummy writes by seeing how many times the 'v' register is incremented.
-	JSR TEST_DummyWrites_Prep ; v register is now 2400
-	LDA $2007 ; refresh the buffer.
-	ASL $2007 ; This should move the v register 3 times, to 2403. Except it won't in every case.
-	LDA $2007 ; You see, repeated writes to $2007 have different behavior depending on the CPU/PPU clock alignment. 
-	LDA $2007 ;
-	LDA $2007 ;
-	LDA $2007 ;  A >= 5
-	CMP #$05  ; Instead of checking for a specific number, just check for the failure case.
-	BMI TEST_FailDummyWrites	
+	
+	;;; Test 1 [Dummy Write Cycles]: Verify PPU Open Bus exists. ;;;
+	; This Dummy Write test relies on PPU Open Bus, so if it's not emulated we cannot check for dummy writes accurately.
+	JSR TEST_PPU_Open_Bus	; It feels pretty silly running another test inside this test.
+	CMP #$01				; But hey, it saves on bytes.
+	BNE TEST_Fail3
 	INC <currentSubTest 
 	
-	;;; Test 2 [Dummy Write Cycles]: Check every official Read-Modify-Write opcode. ;;;
-	; ASL, ROL, LSR, ROR, DEC, INC
-	; Absolute, Absolute+X
-	; 0E, 1E, 2E, 3E, 4E, 5E, 6E, 7E, CE, DE, EE, FE
-	; Let's run this in RAM. It will save on bytes to be able to modify the opcode and keep jumping there in a loop.
-	LDA #$07
-	STA $501
-	LDA #$20
-	STA $502
-	LDA #$60
-	STA $503
-	JSR ResetScroll
-	JSR WaitForVBlank
-	LDY #0
-TEST_DummyWrites_Test2Loop:
-	JSR TEST_DummyWrites_Prep
-	TYA		; Get Y into the upper nybble of A
-	ASL A
-	ASL A
-	ASL A
-	ASL A
-	ORA #$E	; and set the low nybble to E
-	STA $500
-	LDA $2007 ; refresh the ppu buffer
-	LDX #0
-	JSR $500 ; run the test.
-	LDA $2007 	; 
-	LDA $2007	;
-	LDA $2007	;
-	LDA $2007   ; A >= 5
-	CMP #$05	; else, fail the test.
-	BMI TEST_FailDummyWrites
-	INY
-	CPY #8
-	BNE TEST_DummyWrites_Test2SkipLDY
-	LDY #$0C
-TEST_DummyWrites_Test2SkipLDY:
-	TYA
-	AND $02
-	BNE TEST_DummyWritesNoWaitForVBL
-	JSR ResetScroll
-	JSR WaitForVBlank
-TEST_DummyWritesNoWaitForVBL:
-	CPY #$10
-	BNE TEST_DummyWrites_Test2Loop	
-	;; END OF TEST ;;
-	LDA #01
-	RTS
+	; Here's how the test works.
+	; Prep the PPU databus with a specific value, usually 25 or 26.
+	; RMW $2006. Read $2006 (PPU open bus), Dummy Write $2006 and modify value read, write $2006 again.
+	; If we know where the writes will take the 'v' register, then we can simply read $2007 twice after this test to verify the dummy writes occured.
+	
+	; Let's make some preparations...
+	JSR ResetScrollAndWaitForVBlank
+	
+	; Let me explain this subroutine real quick.
+	; The return address is modified inside this subroutine, so it returns to the polit after the following bytes.
+	; Basically, WriteToPPUADDRWithByte will read the two bytes after it, and store them to $2006, then the third byte is stored at $2007.
+	; Then, if the following byte if $FF, exit the subroutine. Othwerwise, grab the next 3 bytes and do it again.
+	JSR WriteToPPUADDRWithByte
+	.byte $25, $4A, $5A ; VRAM[$254A] = $5A
+	.byte $25, $4B, $5C ; VRAM[$254B] = $5C
+	.byte $25, $12, $F1 ; VRAM[$2512] = $F1
+	.byte $25, $92, $7E ; VRAM[$2592] = $7E
+	.byte $25, $24, $11 ; VRAM[$2524] = $11
+	.byte $25, $26, $22 ; VRAM[$2526] = $22
+	
+	.byte $26, $4C, $8D ; VRAM[$264C] = $8D
+	.byte $26, $4D, $A5 ; VRAM[$264D] = $A5
+	.byte $26, $13, $F0 ; VRAM[$2613] = $F0
+	.byte $26, $93, $36 ; VRAM[$2693] = $36
+	.byte $26, $25, $98 ; VRAM[$2625] = $98
+	.byte $26, $27, $4F ; VRAM[$2627] = $4F
+	.byte $FF ; Terminator.
+	JSR ResetScrollAndWaitForVBlank
+
+	;;; Test 2 [Dummy Write Cycles]: See if Read-Modify-Write instructions write to $2006 twice. ;;;
+	JSR TEST_DummyWritePrep_PPUADDR25FA ; v = 25FA, PpuBus = $25
+	ASL $2006							; v = 254A
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$5A
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_PPUADDR25FA ; v = 25FA, PpuBus = $25
+	SEC
+	ROL $2006							; v = 254B
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$5C
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_PPUADDR25FA ; v = 25FA, PpuBus = $25
+	LSR $2006							; v = 2512
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$F1
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_PPUADDR25FA ; v = 25FA, PpuBus = $25
+	SEC
+	ROR $2006							; v = 2592
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$7E
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_PPUADDR25FA ; v = 25FA, PpuBus = $25
+	DEC $2006							; v = 2524
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$11 ;
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_PPUADDR25FA ; v = 25FA, PpuBus = $25
+	INC $2006							; v = 2526
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$22 ;
+	BNE TEST_FailDummyWrites
+	INC <currentSubTest 
+	JMP TEST_DummyWritesPt2
 ;;;;;;;
 TEST_FailDummyWrites:
 	JMP TEST_Fail
+TEST_DummyWritesPt2:
+	JSR ResetScrollAndWaitForVBlank
+	;;; Test 3 [Dummy Write Cycles]: See if Read-Modify-Write instructions with X indexing write to $2006 twice. ;;;
+	LDX #6
+	JSR TEST_DummyWritePrep_26 ; v = 25FA, PpuBus = $26
+	ASL $2000,X			       ; v = 264C
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$8D
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_26 ; v = 25FA, PpuBus = $26
+	SEC
+	ROL $2000,X			       ; v = 264D
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$A5
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_26 ; v = 25FA, PpuBus = $26
+	LSR $2000,X			       ; v = 2613
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$F0
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_26 ; v = 25FA, PpuBus = $26
+	SEC
+	ROR $2000,X			       ; v = 2693
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$36
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_26 ; v = 25FA, PpuBus = $26
+	DEC $2000,X			       ; v = 2625
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$98 ;
+	BNE TEST_FailDummyWrites
+	
+	JSR TEST_DummyWritePrep_26 ; v = 25FA, PpuBus = $26
+	INC $2000,X			       ; v = 2627
+	JSR DoubleLDA2007 ; Read from VRAM
+	CMP #$4F ;
+	BNE TEST_FailDummyWrites
+	
+	;; END OF TEST ;;
+	LDA #01
+	RTS
+
 
 TEST_PowerOnState_CPU_RAM:
 	;;; Test 1 [CPU RAM Power On State]: Print the values recorded at power on ;;;
 	JSR ClearNametableFrom2240
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 	JSR Print32Bytes
 	.word $2244
 	.word PowerOnRAM
@@ -1080,8 +1180,7 @@ TEST_PowerOnState_CPU_RAM:
 TEST_PowerOnState_PPU_RAM:
 	;;; Test 1 [PPU RAM Power On State]: Print the values recorded at power on ;;;
 	JSR ClearNametableFrom2240
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 	JSR Print32Bytes
 	.word $2244
 	.word PowerOnVRAM
@@ -1094,8 +1193,7 @@ TEST_PowerOnState_PPU_RAM:
 TEST_PowerOnState_PPU_Palette:
 	;;; Test 1 [Palette RAM Power On State]: Print the values recorded at power on ;;;
 	JSR ClearNametableFrom2240
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 	JSR Print32Bytes
 	.word $2244
 	.word PowerOnPalette
@@ -1108,8 +1206,7 @@ TEST_PowerOnState_PPU_Palette:
 TEST_PowerOnState_PPU_ResetFlag:
 	;;; Test 1 [PPU Reset Flag]: Print the value recorded at power on ;;;
 	JSR ClearNametableFrom2240
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 	LDA PowerOnTest_PPUReset
 	;; END OF TEST ;;
 	RTS
@@ -1118,8 +1215,7 @@ TEST_PowerOnState_PPU_ResetFlag:
 TEST_PowerOnState_CPU_Registers:
 	;;; Test 1 [CPU Registers Power On State]: Print the values recorded at power on ;;;
 	JSR ClearNametableFrom2240
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 	LDA #0
 	STA <dontSetPointer
 	
@@ -1141,8 +1237,7 @@ TEST_PowerOnState_CPU_Registers:
 	LDA PowerOn_Y
 	JSR PrintByte
 
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 
 	JSR PrintText
 	.word $22A6
@@ -3260,15 +3355,13 @@ TEST_DMA_Plus_2007R:
 	INC <currentSubTest
 	;; END OF TEST ;;
 	
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 	JSR EnableRendering	
 	LDA #1
 	RTS
 
 TEST_Fail7:
-	JSR ResetScroll
-	JSR WaitForVBlank
+	JSR ResetScrollAndWaitForVBlank
 TEST_Fail8:
 	JSR EnableRendering	
 	JMP TEST_Fail
@@ -3957,6 +4050,74 @@ GetVRegisterByXIndexForMenu:
 	RTS
 ;;;;;;;
 
+ReadPPUADDRFromWord: ; Takes the two bytes after the JSR instruction and stores them in $2006. Then reads $2007 twice.
+	STY <$FE
+	JSR CopyReturnAddressToByte0
+	LDA $2002
+	LDY #0
+	LDA [$0000],Y
+	STA $2006
+	INY
+	LDA [$0000],Y
+	STA $2006
+	INY
+	JSR FixRTS
+	LDY <$FE
+	LDA $2007
+	LDA $2007
+	RTS
+;;;;;;;
+SetPPUADDRFromWord:	; pretty much the same as ReadPPUADDRFromWord, but it doesn't run LDA $2007 twice at the end.
+	STA <$FF
+	STY <$FE
+	JSR CopyReturnAddressToByte0
+	LDA $2002
+	LDY #0
+	LDA [$0000],Y
+	STA $2006
+	INY
+	LDA [$0000],Y
+	STA $2006
+	INY
+	JSR FixRTS
+	LDY <$FE
+	LDA <$FF
+	RTS
+;;;;;;;
+WriteToPPUADDRWithByte:	; Sets up v then writes n to it, where n is the third bytes after the JSR
+	STA <$FF
+	STY <$FE
+	JSR CopyReturnAddressToByte0
+	LDA $2002
+	LDY #0
+WriteToPPUADDRWithByteLoop:
+	LDA [$0000],Y
+	CMP #$FF
+	BEQ WriteToPPUADDRWithByteExit
+	STA $2006
+	INY
+	LDA [$0000],Y
+	STA $2006
+	INY
+	LDA [$0000],Y
+	STA $2007
+	INY
+	JMP WriteToPPUADDRWithByteLoop
+WriteToPPUADDRWithByteExit:
+	INY
+	JSR FixRTS
+	LDY <$FE
+	LDA <$FF
+	RTS
+;;;;;;;
+
+DoubleLDA2007:	; There are a few tests that need to read the contents of a PPU address.
+	LDA $2007	; and instead of actually writing out LDA $2007 twice (6 bytes)
+	LDA $2007	; you can just jump here instead. (3 bytes)
+	RTS
+;;;;;;;
+
+
 VRegisterByXIndexLowLUT:
 	.byte $E1, $21, $61, $A1
 
@@ -4101,6 +4262,12 @@ WaitForVblLoop:
 	RTS
 ;;;;;;;
 
+ResetScrollAndWaitForVBlank:
+	JSR ResetScroll
+	JSR WaitForVBlank
+	RTS
+;;;;;;;
+
 ReadController1:
 	LDA <controller
 	STA <controller_New
@@ -4149,7 +4316,7 @@ DpadConflictMask:
 
 RunTest:
 	; This function sets things up, then jumps to "JSRFromRAM" where a JSR to the test occurs.
-	; Basically, this makes a bunch of preperations for tests, like clearing page 5 of RAM, halting the NMI, etc.
+	; Basically, this makes a bunch of preparations for tests, like clearing page 5 of RAM, halting the NMI, etc.
 	STY <$FE	                  ; Store the Y register
 	STX <$FD	                  ; Store the X register
 	JSR DisableNMI	              ; We don't want the NMI occuring during the tests. (and if we do, overwrite the NMI function in RAM before enabling it)
@@ -4183,7 +4350,7 @@ RunTest:
 	                              ; The A Register holds the results of the test.
 	LDY #0
 	STA [TestResultPointer],Y     ; store the test results in RAM.
-	JSR WaitForVBlank		      ; and wait for VBlank before updating the "...." text with the results.
+	JSR ResetScrollAndWaitForVBlank; and wait for VBlank before updating the "...." text with the results.
 	LDX <menuCursorYPos		      ; load X for the upcoming subroutines.
 	JSR DrawTEST			      ; draw "PASS" or "FAIL x"
 	JSR UpdateTESTAttributes      ; and update the colors for that text.
