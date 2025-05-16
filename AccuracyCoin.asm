@@ -98,6 +98,7 @@ PowerOn_Y = $372
 PowerOn_SP = $373
 PowerOn_P = $374
 
+result_Unimplemented = $0400
 result_CPUInstr = $0401
 result_UnofficialInstr = $0402
 result_RAMMirror = $0403
@@ -359,7 +360,7 @@ Suite_CPUBehavior:
 	table "ROM is not writable", $FF, result_ROMnotWritable, TEST_ROMnotWritable
 	table "RAM Mirroring", $FF, result_RAMMirror, TEST_RamMirroring
 	table "PPU Register Mirroring", $FF, result_PPURegMirror, TEST_PPURegMirroring
-	table "$FFFF + X Wraparound", $FF, $0100, DebugTest
+	table "$FFFF + X Wraparound", $FF, $result_Unimplemented, DebugTest
 	table "Dummy read cycles", $FF, result_DummyReads, TEST_DummyReads
 	table "Dummy write cycles", $FF, result_DummyWrites, TEST_DummyWrites
 	table "Open Bus", $FF, result_OpenBus, TEST_OpenBus
@@ -481,23 +482,23 @@ Suite_UnofficialOps_Immediates:
 	;; CPU Interrupts ;;
 Suite_CPUInterrupts:
 	.byte "CPU Interrupts by Blargg", $FF
-	table "CLI Latency", $FF, $0100, DebugTest
-	table "NMI AND BRK", $FF, $0100, DebugTest
-	table "NMI AND IRQ", $FF, $0100, DebugTest
-	table "IRQ AND DMA", $FF, $0100, DebugTest
-	table "Branch delays IRQ", $FF, $0100, DebugTest
+	table "CLI Latency", $FF, $result_Unimplemented, DebugTest
+	table "NMI AND BRK", $FF, $result_Unimplemented, DebugTest
+	table "NMI AND IRQ", $FF, $result_Unimplemented, DebugTest
+	table "IRQ AND DMA", $FF, $result_Unimplemented, DebugTest
+	table "Branch delays IRQ", $FF, $result_Unimplemented, DebugTest
 	.byte $FF
 	
 	;; DMA Tests ;;
 Suite_DMATests:
 	.byte "DMA tests", $FF	
 	table "DMA + $2007 Read", $FF, result_DMA_Plus_2007R, TEST_DMA_Plus_2007R
-	table "DMA + $2007 Write", $FF, $0100, DebugTest
-	table "DMA + $4016 Read", $FF, $0100, DebugTest
-	table "DMC DMA + OAM DMA", $FF, $0100, DebugTest
-	table "DMC DMA Implicit Stop", $FF, $0100, DebugTest
-	table "DMC DMA Explicit Stop", $FF, $0100, DebugTest
-	table "APU Register Activation", $FF, $0100, DebugTest
+	table "DMA + $2007 Write", $FF, $result_Unimplemented, DebugTest
+	table "DMA + $4016 Read", $FF, $result_Unimplemented, DebugTest
+	table "DMC DMA + OAM DMA", $FF, $result_Unimplemented, DebugTest
+	table "DMC DMA Implicit Stop", $FF, $result_Unimplemented, DebugTest
+	table "DMC DMA Explicit Stop", $FF, $result_Unimplemented, DebugTest
+	table "APU Register Activation", $FF, $result_Unimplemented, DebugTest
 	.byte $FF
 	
 	;; Power On State ;;
@@ -513,8 +514,8 @@ Suite_PowerOnState:
 	;; PPU Stuff ;;
 Suite_PPUBehavior:
 	.byte "PPU Behavior", $FF
-	table "$2002 Race condition", $FF, $0100, DebugTest
-	table "Palette Corruption", $FF, $0100, DebugTest
+	table "$2002 Race condition", $FF, $result_Unimplemented, DebugTest
+	table "Palette Corruption", $FF, $result_Unimplemented, DebugTest
 	.byte $FF
 	
 
