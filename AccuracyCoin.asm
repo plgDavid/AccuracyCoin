@@ -185,10 +185,8 @@ result_UnOp_SHX_9E = $44A
 result_UnOp_LAE_BB = $44B
 
 result_DMA_Plus_2007R = $44C
-
-
 result_FFFF_Plus_X_Wraparound = $44D
-
+result_PPUOpenBus = $044E
 
 
 result_PowOn_CPURAM = $0480
@@ -358,15 +356,16 @@ EndTableTable:
 	;; CPU Behavior ;;
 Suite_CPUBehavior:
 	.byte "CPU Behavior", $FF
-	table "CPU Instructions", $FF, result_CPUInstr, DebugTest
+	table "CPU Instructions", 		 $FF, result_CPUInstr, DebugTest
 	table "Unofficial Instructions", $FF, result_UnofficialInstr, TEST_UnofficialInstructionsExist
-	table "ROM is not writable", $FF, result_ROMnotWritable, TEST_ROMnotWritable
-	table "RAM Mirroring", $FF, result_RAMMirror, TEST_RamMirroring
-	table "PPU Register Mirroring", $FF, result_PPURegMirror, TEST_PPURegMirroring
-	table "$FFFF + X Wraparound", $FF, result_FFFF_Plus_X_Wraparound, Test_FFFF_Plus_X_Wraparound
-	table "Dummy read cycles", $FF, result_DummyReads, TEST_DummyReads
-	table "Dummy write cycles", $FF, result_DummyWrites, TEST_DummyWrites
-	table "Open Bus", $FF, result_OpenBus, TEST_OpenBus
+	table "ROM is not writable", 	 $FF, result_ROMnotWritable, TEST_ROMnotWritable
+	table "RAM Mirroring", 			 $FF, result_RAMMirror, TEST_RamMirroring
+	table "PPU Register Mirroring",  $FF, result_PPURegMirror, TEST_PPURegMirroring
+	table "PPU Open Bus",			 $FF, result_PPUOpenBus, TEST_PPU_Open_Bus
+	table "$FFFF + X Wraparound", 	 $FF, result_FFFF_Plus_X_Wraparound, Test_FFFF_Plus_X_Wraparound
+	table "Dummy read cycles", 		 $FF, result_DummyReads, TEST_DummyReads
+	table "Dummy write cycles", 	 $FF, result_DummyWrites, TEST_DummyWrites
+	table "Open Bus", 				 $FF, result_OpenBus, TEST_OpenBus
 	.byte $FF
 	
 	;; Unofficial Instructions: SLO ;;
@@ -987,17 +986,94 @@ TEST_DummyWritesPrepLoop:
 TEST_PPU_Open_Bus:
 	;;; Test 1 [PPU Open Bus]: Verify PPU Open Bus exists. ;;;
 	; Don't worry, this this is remarkably simple.
+	LDX #0
+	LDY #1
 	LDA #$5A
 	STA $2002 ; Address $2002 is read-only. This puts $5A on the ppu bus.
-	LDA #0	  ; clear A for the test.
+	TXA	  ; clear A for the test.
 	LDA $2000 ; Address $2000 is write-only, so teh value read is the value of the PPU bus. ($5A)
 	CMP #$5A
-	BNE TEST_Fail3
+	BNE TEST_FailPPUOpenBus
+	INC <currentSubTest 
+	
+	;;; Test 2 [PPU Open Bus]: All PPU Registers update PPU Open Bus. ;;;
+	; Writing to $2000 updates the PPU Databus
+	LDA <PPUCTRL_COPY
+	STA $2000 ; this updates the PPU bus and changes nothing with the register... hopefully.
+	TXA
+	LDA $2001 ; read a different write-only register.
+	CMP <PPUCTRL_COPY
+	BNE TEST_FailPPUOpenBus
+	
+	; Writing to $2001 updates the PPU Databus
+	LDA <PPUMASK_COPY
+	STA $2001
+	TXA
+	LDA $2000
+	CMP <PPUMASK_COPY
+	BNE TEST_FailPPUOpenBus
+
+	; we've already tested writing to $2002
+	
+	; Writing to $2003 updates the PPU Databus
+	LDA #04
+	STA $2003
+	TXA
+	LDA $2000
+	CMP #04
+	BNE TEST_FailPPUOpenBus
+	
+	; Writing to $2004 updates the PPU Databus
+	LDA #$FF
+	STA $2004
+	TXA
+	LDA $2000
+	CMP #$FF
+	BNE TEST_FailPPUOpenBus
+	
+	; Writing to $2005 updates the PPU Databus
+	LDA $2002
+	LDA #$00
+	STA $2005
+	TYA
+	LDA $2000
+	CMP #$00
+	BNE TEST_FailPPUOpenBus
+	
+	; Writing to $2006 updates the PPU Databus
+	LDA $2002
+	LDA #$20
+	STA $2006
+	TXA
+	LDA $2000
+	CMP #$20
+	BNE TEST_FailPPUOpenBus
+	
+	; Writing to $2007 updates the PPU Databus
+	LDA #$24
+	STA $2007
+	TYA
+	LDA $2000
+	CMP #$24
+	BNE TEST_FailPPUOpenBus
+	INC <currentSubTest 
+	
+	;;; Test 3 [PPU Open Bus]: Address $2002, bits 0 through 4 are open bus ;;;
+	LDA $2002
+	LDA #$15
+	STA $2006
+	LDA $2002
+	AND #$1F
+	CMP #$15
+	BNE TEST_FailPPUOpenBus
+
 	;; END OF TEST ;;
-	; TODO: Consider checking every PPU Register instead of just these 2.
 	LDA #01
 	RTS
 ;;;;;;;
+TEST_FailPPUOpenBus:
+	JMP TEST_Fail
+
 TEST_DummyWritePrep_SetUpV:
 	LDA #$25
 	STA $2006
@@ -1010,15 +1086,14 @@ TEST_DummyWritePrep_PPUADDR25FA: ; This exists to save bytes
 	JSR SetPPUADDRFromWord
 	.byte $25, $FA
 	LDA #$25
-	STA $2003 ; Set the PPU Open bus value to 25
+	STA $2002 ; Set the PPU Open bus value to 25
 	RTS
 ;;;;;;;
 
 TEST_DummyWritePrep_26: ; This exists to save bytes
-	JSR SetPPUADDRFromWord
-	.byte $25, $FA
+	JSR TEST_DummyWritePrep_PPUADDR25FA ; just leech off this to save bytes.
 	LDA #$26
-	STA $2003 ; Set the PPU Open bus value to 26
+	STA $2002 ; Set the PPU Open bus value to 26
 	RTS
 ;;;;;;;
 
@@ -1042,7 +1117,7 @@ TEST_DummyWrites:
 	; This Dummy Write test relies on PPU Open Bus, so if it's not emulated we cannot check for dummy writes accurately.
 	JSR TEST_PPU_Open_Bus	; It feels pretty silly running another test inside this test.
 	CMP #$01				; But hey, it saves on bytes.
-	BNE TEST_Fail3
+	BNE TEST_FailPPUOpenBus
 	INC <currentSubTest 
 	
 	; Here's how the test works.
