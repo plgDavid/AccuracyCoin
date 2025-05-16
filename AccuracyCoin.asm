@@ -959,38 +959,33 @@ TEST_Fail3:
 ;;;;;;;
 
 TEST_DummyWrites_Prep:
-	; Load OAM[0] with #0
-	; Load OAM[1] with #1
-	; Load OAM[2] with #2
-	; Load OAM[3] with #3
+	; Load VRAM[2400] with #0
+	; Load VRAM[2401] with #1
+	; Load VRAM[2402] with #2
+	; Load VRAM[2403] with #3
 	; keep Y unchanged.
 	STY <$FE
-	LDX #0
-	STX $2003
-	LDY #4
+	LDA $2002
+	LDA #$24
+	STA $2006
+	LDA #0
+	STA $2006
+	TAX
+	LDY #8
 TEST_DummyWritesPrepLoop:
-	STX $2004
+	STX $2007
 	INX
 	DEY
-	BNE TEST_DummyWritesPrepLoop	
-	LDX #0
-	STX $2003
+	BNE TEST_DummyWritesPrepLoop
+	LDA #$24
+	STA $2006
+	LDA #0
+	STA $2006
 	LDY <$FE
 	RTS
 ;;;;;;;
 TEST_DummyWrites:
-	; Pre-Test preparations.
-	JSR TEST_DummyWrites_Prep
-	;;; Test 1 [Dummy Write Cycles]: Confirm reading from $2004 works.
-	LDA #03
-	STA $2003
-	LDA #0
-	LDA $2004 ; A=3
-	CMP #$03
-	BNE TEST_Fail3
-	INC <currentSubTest 
-	
-	;;; Test 2 [Dummy Write Cycles]: Read-Modify-Write instruction perform dummy reads. ;;;
+	;;; Test 1 [Dummy Write Cycles]: Read-Modify-Write instruction perform dummy reads. ;;;
 	; Consider the ASL instruction.
 	; This is a "Read-Modify-Write" instruction, for it does the following:
 	; Read target address, modify the value, and write it back.
@@ -1004,12 +999,15 @@ TEST_DummyWrites:
 	; 6: Write this new value to $0400.
 	;
 	; Focus on cycle 5. That's the dummy write.
-	; And since writes to $2004 increment the PPU's OAM address, we can test for dummy writes by seeing how many times the OAM address is incremented.
-	JSR TEST_DummyWrites_Prep ; OAM address is now 0	
-	ASL $2004 ; This should move the OAM address twice, to 2.
-	LDA $2004 ; A=2
-	CMP #$02
-	BNE TEST_Fail3
+	; And since writes to $2007 increment the PPU's 'v' register, we can test for dummy writes by seeing how many times the 'v' register is incremented.
+	JSR TEST_DummyWrites_Prep ; v register is now 2400
+	LDA $2007 ; refresh the buffer.
+	ASL $2007 ; This should move the v register 3 times, to 2403. Except it won't in every case.
+	LDA $2007 ; You see, repeated writes to $2007 have different behavior depending on the CPU/PPU clock alignment. 
+	LDA $2007 ;
+	LDA $2007 ;  A >= 5
+	CMP #$05  ; Instead of checking for a specific number, just check for the failure case.
+	BMI TEST_FailDummyWrites	
 	INC <currentSubTest 
 	
 	;;; Test 2 [Dummy Write Cycles]: Check every official Read-Modify-Write opcode. ;;;
@@ -1017,13 +1015,15 @@ TEST_DummyWrites:
 	; Absolute, Absolute+X
 	; 0E, 1E, 2E, 3E, 4E, 5E, 6E, 7E, CE, DE, EE, FE
 	; Let's run this in RAM. It will save on bytes to be able to modify the opcode and keep jumping there in a loop.
-	LDA #$04
+	LDA #$07
 	STA $501
 	LDA #$20
 	STA $502
 	LDA #$60
 	STA $503
 	LDY #0
+	JSR ResetScroll
+	JSR WaitForVBlank
 TEST_DummyWrites_Test2Loop:
 	JSR TEST_DummyWrites_Prep
 	TYA		; Get Y into the upper nybble of A
@@ -1033,21 +1033,32 @@ TEST_DummyWrites_Test2Loop:
 	ASL A
 	ORA #$E	; and set the low nybble to E
 	STA $500
+	LDA $2007 ; refresh buffer
 	JSR $500 ; run the test.
-	LDA $2004 	; A=2
-	CMP #$02	; else, fail the test.
-	BNE TEST_Fail3
+	LDA $2007 	; A >= 5
+	LDA $2007	;
+	LDA $2007	;
+	CMP #$05	; else, fail the test.
+	BMI TEST_FailDummyWrites
 	INY
 	CPY #8
 	BNE TEST_DummyWrites_Test2SkipLDY
 	LDY #$0C
 TEST_DummyWrites_Test2SkipLDY:
+	TYA
+	AND $02
+	BNE TEST_DummyWritesNoWaitForVBL
+	JSR ResetScroll
+	JSR WaitForVBlank
+TEST_DummyWritesNoWaitForVBL:
 	CPY #$10
 	BNE TEST_DummyWrites_Test2Loop	
 	;; END OF TEST ;;
 	LDA #01
 	RTS
 ;;;;;;;
+TEST_FailDummyWrites:
+	JMP TEST_Fail
 
 TEST_PowerOnState_CPU_RAM:
 	;;; Test 1 [CPU RAM Power On State]: Print the values recorded at power on ;;;
@@ -4080,12 +4091,10 @@ DrawNewSuiteTable:
 ;;;;;;;
 	
 WaitForVBlank:
-	LDX #$FF
+	LDA $2002
 WaitForVblLoop:
 	LDA $2002
 	BPL WaitForVblLoop
-	INX
-	BEQ WaitForVblLoop
 	RTS
 ;;;;;;;
 
