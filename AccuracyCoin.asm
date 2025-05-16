@@ -1068,10 +1068,12 @@ TEST_PPU_Open_Bus:
 	BNE TEST_FailPPUOpenBus
 
 	;; END OF TEST ;;
+	JSR ResetScroll
 	LDA #01
 	RTS
 ;;;;;;;
 TEST_FailPPUOpenBus:
+	JSR ResetScroll
 	JMP TEST_Fail
 
 TEST_DummyWritePrep_SetUpV:
@@ -1191,6 +1193,7 @@ TEST_DummyWrites:
 	JMP TEST_DummyWritesPt2
 ;;;;;;;
 TEST_FailDummyWrites:
+	JSR ResetScroll
 	JMP TEST_Fail
 TEST_DummyWritesPt2:
 	JSR ResetScrollAndWaitForVBlank
@@ -1235,6 +1238,7 @@ TEST_DummyWritesPt2:
 	BNE TEST_FailDummyWrites
 	
 	;; END OF TEST ;;
+	JSR ResetScroll
 	LDA #01
 	RTS
 
@@ -4425,7 +4429,7 @@ RunTest:
 	                              ; The A Register holds the results of the test.
 	LDY #0
 	STA [TestResultPointer],Y     ; store the test results in RAM.
-	JSR ResetScrollAndWaitForVBlank; and wait for VBlank before updating the "...." text with the results.
+	JSR WaitForVBlank			  ; and wait for VBlank before updating the "...." text with the results.
 	LDX <menuCursorYPos		      ; load X for the upcoming subroutines.
 	JSR DrawTEST			      ; draw "PASS" or "FAIL x"
 	JSR UpdateTESTAttributes      ; and update the colors for that text.
