@@ -242,6 +242,7 @@ TEST_PPUResetFlag:
 	LDA #$5A ; "magic number"
 	STA $2007
 	; Okay, I'll be back in 2 frames to check on you...
+	LDX #$FF
 	LDA $2002
 VblLoop:
 	LDA $2002
@@ -2522,7 +2523,7 @@ TEST_SHA_Behavior1_9F_JMP:
 	JMP TEST_SHA_Behavior1_9F
 	
 	; So there are 2 different behaviors you can expect here.
-	; H is the high byte of the address bus at the start of the cycle in which the Y register is used as an offset.
+	; H is the high byte of the address bus before indexing, +1
 	; 1. Write: A & X & H
 	; 2. Write: A & (X | Magic) & H :: *Magic CAN CHANGE!
 	;		Magic has been seen to be 00, F5, F9, FA, and FF.
@@ -2679,8 +2680,146 @@ TEST_SHA_Behavior2:
 
 
 TEST_SHS_9B:
-	LDA #2
+	LDA #PostDMACyclesUntilTestInstruction+4
+	STA <Test_UnOp_CycleDelayPostDMA
+	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
+	TSX
+	STX <Copy_SP
+	LDA #$02
+	LDX #$FF
+	LDY #$10
+	.byte $9F, $F0, $1D
+	LDX <Copy_SP
+	TXS
+	LDA $1E00
+	CMP #$02
+	BEQ TEST_SHS_Behavior2_9B_JMP
+	LDA $200
+	CMP #$02
+	BEQ TEST_SHS_Behavior1_9B
+	LDA #$02
 	RTS
+	
+TEST_SHS_Behavior2_9B_JMP:
+	JMP TEST_SHS_Behavior2_9B
+	
+TEST_SHS_Behavior1_9B:
+	LDA #$9B
+	JSR TEST_UnOp_Setup; Set the opcode
+	; This test follows the documented behavior of these instructions. Most emulators probably go here.
+	; Special thanks to 8BitLord64 for help researching this.
+	; Write: A & X & H
+	; Hi = Hi & A & X
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $0525
+	.byte $FF
+	.byte $FF, $FF, $00, (flag_i), $FF
+	.word $0525
+	.byte $06
+	.byte $FF, $FF, $00, (flag_i), $FF
+	; SHS ;
+	; This test needs to be VERY carefully made
+	; This test also modifies the stack pointer.
+	; the high byte of the target address can be modified "unexpectedly"
+	; let's run some tests where the high byte doesn't change.
+	; Store (A & X & H), where "H" is the high byte of the target address + 1.
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $1D00	; If someone is testing for this instruction, they would surely have RAM mirroring implemented.
+	.byte $FF
+	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v), $35
+	.word $0500
+	.byte $14
+	.byte $3F, $F5, $00, (flag_i | flag_c | flag_z | flag_v), $35
+	
+	; Now to make the high byte go unstable.
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $1F10 ; $1E90 will be the operand.
+	.byte $FF
+	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v), $05
+	.word $0510
+	.byte $05
+	.byte $0D, $15, $80, (flag_i | flag_c | flag_z | flag_v), $05
+	; Hi = ($1E+1) & A & X;
+	; 	 = $05
+	; $510 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	INC <$55 ; make this non-zero for the test.	
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $0555 ; $0402 will be the operand.
+	.byte $FF
+	.byte $F0, $09, $FF, (flag_i), $00
+	.word $0055
+	.byte $00
+	.byte $F0, $09, $FF, (flag_i), $00
+	; Hi = ($1E+1) & A & X;
+	; 	 = $00
+	; $510 = A & X & H
+	;	   = $0D & $15 & $1F
+	;	   = 5
+	
+;; END OF TEST ;;
+	JSR WaitForVBlank
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $22D0
+	.byte " SHS Behavior 1", $FF
+	JSR ResetScroll
+	LDA #1
+	RTS
+TEST_SHS_Behavior2_9B:
+	LDA #$9B
+	JSR TEST_UnOp_Setup; Set the opcode
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $0525
+	.byte $FF
+	.byte $FF, $FF, $00, (flag_i), $FF
+	.word $0525
+	.byte $06
+	.byte $FF, $FF, $00, (flag_i), $FF
+	
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $1D00
+	.byte $FF
+	.byte $03, $FF, $00, (flag_i), $03
+	.word $0500
+	.byte $02
+	.byte $03, $FF, $00, (flag_i), $03
+	
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $1F10 ; $1E90 will be the operand.
+	.byte $FF
+	.byte $0A, $FF, $80, (flag_i | flag_c | flag_z | flag_v), $0A
+	.word $0710
+	.byte $0A
+	.byte $0A, $FF, $80, (flag_i | flag_c | flag_z | flag_v), $0A
+
+;; END OF TEST ;;
+	JSR WaitForVBlank
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $22D0
+	.byte " SHS Behavior 2", $FF
+	JSR PrintTextCentered
+	.word $2350
+	.byte "SHS magic = $", $FF
+	TSX
+	STX <Copy_SP
+	LDA #$FF
+	LDX #$00
+	LDY #$60
+	.byte $9B, $F0, $FE ; SHS $FEF0, Y
+	LDX <Copy_SP
+	TXS
+	LDA <$50
+	JSR PrintByte
+	JSR ResetScroll
+	LDA #1
+	RTS
+
+	
 
 
 TEST_SHY_9C:
