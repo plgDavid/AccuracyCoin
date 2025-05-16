@@ -187,6 +187,7 @@ result_UnOp_LAE_BB = $44B
 result_DMA_Plus_2007R = $44C
 result_FFFF_Plus_X_Wraparound = $44D
 result_PPUOpenBus = $044E
+result_DMA_Plus_2007W = $44F
 
 
 result_PowOn_CPURAM = $0480
@@ -326,12 +327,7 @@ InfiniteLoop:
 	.org $8100
 	; Menu Data
 
-table .macro
-	.byte \1
-	.byte \2
-	.word \3
-	.word \4
-	.endm
+
 
 TableTable:
 	.word Suite_CPUBehavior
@@ -351,7 +347,14 @@ TableTable:
 EndTableTable:
 
 
-
+	; I'm not a huge fan of using macros in this ROM, since they make the asm code look different than the compiled bytes, and thus harder to debug.
+	; This macro is just a series of bytes and words though, so it's not too hard to read.
+table .macro
+	.byte \1
+	.byte \2
+	.word \3
+	.word \4
+	.endm
 
 	;; CPU Behavior ;;
 Suite_CPUBehavior:
@@ -360,9 +363,9 @@ Suite_CPUBehavior:
 	table "Unofficial Instructions", $FF, result_UnofficialInstr, TEST_UnofficialInstructionsExist
 	table "ROM is not writable", 	 $FF, result_ROMnotWritable, TEST_ROMnotWritable
 	table "RAM Mirroring", 			 $FF, result_RAMMirror, TEST_RamMirroring
-	table "PPU Register Mirroring",  $FF, result_PPURegMirror, TEST_PPURegMirroring
-	table "PPU Open Bus",			 $FF, result_PPUOpenBus, TEST_PPU_Open_Bus
 	table "$FFFF + X Wraparound", 	 $FF, result_FFFF_Plus_X_Wraparound, Test_FFFF_Plus_X_Wraparound
+	table "PPU Register Mirroring",  $FF, result_PPURegMirror, TEST_PPURegMirroring
+	table "PPU Register Open Bus",	 $FF, result_PPUOpenBus, TEST_PPU_Open_Bus
 	table "Dummy read cycles", 		 $FF, result_DummyReads, TEST_DummyReads
 	table "Dummy write cycles", 	 $FF, result_DummyWrites, TEST_DummyWrites
 	table "Open Bus", 				 $FF, result_OpenBus, TEST_OpenBus
@@ -495,7 +498,7 @@ Suite_CPUInterrupts:
 Suite_DMATests:
 	.byte "DMA tests", $FF	
 	table "DMA + $2007 Read", $FF, result_DMA_Plus_2007R, TEST_DMA_Plus_2007R
-	table "DMA + $2007 Write", $FF, result_Unimplemented, DebugTest
+	table "DMA + $2007 Write", $FF, result_DMA_Plus_2007W, TEST_DMA_Plus_2007W
 	table "DMA + $4016 Read", $FF, result_Unimplemented, DebugTest
 	table "DMC DMA + OAM DMA", $FF, result_Unimplemented, DebugTest
 	table "DMC DMA Implicit Stop", $FF, result_Unimplemented, DebugTest
@@ -520,17 +523,6 @@ Suite_PPUBehavior:
 	table "Palette Corruption", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;              Error Codes                ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-
-
-
-
 	
 	.bank 1
 	.org $A000
@@ -986,6 +978,10 @@ TEST_DummyWritesPrepLoop:
 TEST_PPU_Open_Bus:
 	;;; Test 1 [PPU Open Bus]: Verify PPU Open Bus exists. ;;;
 	; Don't worry, this this is remarkably simple.
+	; Here's how PPU Open bus works.
+	; The PPU Databus is updated whenever the CPU writes to any PPU Register.
+	;
+	
 	LDX #0
 	LDY #1
 	LDA #$5A
@@ -1104,7 +1100,7 @@ TEST_DummyWrites:
 	; Consider the ASL instruction.
 	; This is a "Read-Modify-Write" instruction, for it does the following:
 	; Read target address, modify the value, and write it back.
-	; But that's not the whole story, as this instruction has "Dummy Writes", and it can have dummy reads too!
+	; But that's not the whole story, as this instruction has "Dummy Writes". (Indexed instructions also have dummy reads in addition to dummy writes)
 	; Consider ASL $0400. Let's see every cycle of this instruction.
 	; 1: fetch opcode 
 	; 2: fetch low byte
@@ -1123,9 +1119,17 @@ TEST_DummyWrites:
 	INC <currentSubTest 
 	
 	; Here's how the test works.
-	; Prep the PPU databus with a specific value, usually 25 or 26.
+	; Prep the PPU databus with a specific value, usually $25 or $26.
 	; RMW $2006. Read $2006 (PPU open bus), Dummy Write $2006 and modify value read, write $2006 again.
 	; If we know where the writes will take the 'v' register, then we can simply read $2007 twice after this test to verify the dummy writes occured.
+	
+	; for example: INC $2006
+	; 1: fetch opcode 
+	; 2: fetch low byte
+	; 3: fetch high byte
+	; 4: Read $2006. (address $2006 is write-only, so we read the PPU data bus: #$25)
+	; 5: Write #$25 to $2006, then do the operation on this value. (INC #$25 = #$26)
+	; 6: Write #$26 to $2006. The VRAM address is now $2526	
 	
 	; Let's make some preparations...
 	JSR ResetScrollAndWaitForVBlank
@@ -3384,13 +3388,7 @@ TEST_MAGIC:
 	LDA #1
 	RTS
 
-TEST_DMA_Plus_2007R:
-	; Here's the set up:
-	; VRAM will read 0 1 2 3 4
-	; The LDA $2007 instruction has 4 read cycles.
-	; [Opcode] [Operand1] [Operand2] [Read $2007]
-	; if the DMA occurs between [Operand2] and [Read $2007], the ppu 'v' register will be incremented twice due to the DMA's dummy cycles.
-	JSR WaitForVBlank
+TEST_DMA_Plus_2007_Prep:
 	JSR DisableRendering ; let's disable rendering for this one.
 	LDX #$24
 	STX $2006
@@ -3408,9 +3406,18 @@ TEST_DMA_Plus_2007R:
 	LDX #$24
 	STX $2006
 	LDX #$01
-	STX $2006 ; and set 'v' back to $2800
+	STX $2006 ; and set 'v' back to $2400
 	LDA $2007 ; read $2007 and prep the buffer.
-	
+	RTS
+;;;;;;;
+
+TEST_DMA_Plus_2007R:
+	; Here's the set up:
+	; VRAM will read 0 1 2 3 4
+	; The LDA $2007 instruction has 4 read cycles.
+	; [Opcode] [Operand1] [Operand2] [Read $2007]
+	; if the DMA occurs between [Operand2] and [Read $2007], the ppu 'v' register will be incremented twice due to the DMA's dummy cycles.
+	JSR TEST_DMA_Plus_2007_Prep	
 	JSR DMASync_50CyclesRemaining	; sync DMA
 	; We have 50 CPU cycles until the DMA occurs.
 	JSR Clockslide_47
@@ -3432,6 +3439,32 @@ TEST_DMA_Plus_2007R:
 	CMP #$03
 	BMI TEST_Fail7
 	INC <currentSubTest
+	;; END OF TEST ;;
+	
+	JSR ResetScrollAndWaitForVBlank
+	JSR EnableRendering	
+	LDA #1
+	RTS
+;;;;;;;
+
+TEST_DMA_Plus_2007W:
+	; Here's the set up:
+	; VRAM will read 0 1 2 3 4
+	; The STA $2007 instruction has 3 read cycles, then a write cycle.
+	; [Opcode] [Operand1] [Operand2] [Write $2007]
+	; However, DMC DMA's cannot interrupt a write cycle! Therefore, the address bus cannot be $2007 during the DMA, so nothing unusual happens!
+	JSR TEST_DMA_Plus_2007_Prep	; the v register is now at 2401
+	JSR DMASync_50CyclesRemaining	; sync DMA
+	; We have 50 CPU cycles until the DMA occurs.
+	JSR Clockslide_45 ;+45 cycles
+	LDA #$5A		  ;+2 cycles
+	STA $2007 ; <------- [Opcode] [Operand1] [Operand2] [DMA attempts, but fails. Write] [Opcode (NOP)] [*DMA*]
+	NOP 	  ; The DMA occurs inside this NOP, if your emulator is timing it right.
+	NOP		  ; And the v register is now at $2402. It was not incremented extra times in the DMA, so LDA $2007 read the expected value.
+	;;; Test 1 [DMA + $2007 Write]: The v register should be at $2402 ;;;
+	JSR DoubleLDA2007
+	CMP #$03
+	BNE TEST_Fail7
 	;; END OF TEST ;;
 	
 	JSR ResetScrollAndWaitForVBlank
@@ -4495,61 +4528,6 @@ SetUpNMIRoutineForMainMenu:
 	RTS
 ;;;;;;;
 
-DMASync:
-	LDA #$80
-	STA $4010 ; Enable DMC IRQ
-	LDA #$00
-	STA $4013 ; Length = 0 (+1)
-	STA $4015 ; Disable DMC
-	LDA #$10
-	STA $4015 ; Enable DMC (clear the DMC buffer)
-	NOP
-	STA $4015 ; Enable DMC a second time.
-sync_dmc_loop:
-	BIT $4015
-	BNE sync_dmc_loop ; wait for DMC Interrupt
-	NOP
-	NOP
-	NOP
-	LDA #$E2
-	BNE sync_dmc_first ; branch always to sync_dmc_first
-sync_dmc_wait:
-	LDA #$E3
-sync_dmc_first:
-	NOP
-	NOP
-	NOP
-	NOP
-	SEC
-	SBC #$01
-	BNE sync_dmc_first
-	LDA #$10
-	STA $4015
-	NOP
-	BIT $4015
-	BNE sync_dmc_wait
-	; The DMA is now synced!
-	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
-	NOP
-	LDX #$A3
-	LDA #$03
-sync_dmc_loop2:
-	DEX
-	BNE sync_dmc_loop2
-	SEC
-	SBC #$01
-	BNE sync_dmc_loop2
-	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
-	LDA #$10
-	STA $4015 ; start DMC
-	LDA #$10
-	STA $4015 ; start DMC again
-	RTS ; You got 3404 cycles until the DMA, and this RTS takes 6 of them.
-	; in other words, 3398 cycles after this RTS, a DMA will occur.
-
-
 DMASync_50CyclesRemaining:
 	JSR DMASync
 	; the DMA is in 3398 cycles;
@@ -4573,6 +4551,73 @@ DMASync_50MinusACyclesRemaining:
 	LDA <Test_UnOp_CycleDelayPostDMA ; +3
 	JSR Clockslide36_Plus_A
 	RTS ; 50-A cycles after this RTS, a DMA will occur.
+
+	; various clockslides
+Clockslide_100:       ;=6
+	JSR Clockslide_38 ;=44
+	JSR Clockslide_50 ;=94
+	RTS			      ;=100
+;;;;;;;
+Clockslide_500:        ;=6
+	JSR Clockslide_38  ;=44
+	JSR Clockslide_50  ;=94
+	JSR Clockslide_100 ;=194
+	JSR Clockslide_100 ;=294
+	JSR Clockslide_100 ;=394
+	JSR Clockslide_100 ;=494
+	RTS			       ;=500
+;;;;;;;
+Clockslide_3000:       ;=6
+	JSR Clockslide_38  ;=44
+	JSR Clockslide_50  ;=94
+	JSR Clockslide_100 ;=194
+	JSR Clockslide_100 ;=294
+	JSR Clockslide_100 ;=394
+	JSR Clockslide_100 ;=494
+	JSR Clockslide_500 ;=0994
+	JSR Clockslide_500 ;=1494
+	JSR Clockslide_500 ;=1994
+	JSR Clockslide_500 ;=2494
+	JSR Clockslide_500 ;=2994
+	RTS			       ;=3000
+;;;;;;;
+
+;A frame has about 29780 cycles, so let's make a few around that number.
+Clockslide_29750:		;=6
+	JSR Clockslide_38 	;=44
+	JSR Clockslide_100	;=144
+	JSR Clockslide_100	;=244
+	JSR Clockslide_500	;=744
+	JSR Clockslide_500	;=1244
+	JSR Clockslide_500	;=1744
+	JSR Clockslide_500	;=2244
+	JSR Clockslide_500	;=2744
+	JSR Clockslide_3000	;=5744
+	JSR Clockslide_3000	;=8744
+	JSR Clockslide_3000	;=11744
+	JSR Clockslide_3000	;=14744
+	JSR Clockslide_3000	;=17744
+	JSR Clockslide_3000	;=20744
+	JSR Clockslide_3000	;=23744
+	JSR Clockslide_3000	;=26744
+	JSR Clockslide_3000	;=29744
+	RTS					;=29750
+;;;;;;;
+Clockslide_29780:		;=6
+	JSR Clockslide_18	;=24
+	JSR Clockslide_29750;=29774
+	RTS					;=29780
+;;;;;;;
+Clockslide36_Plus_A:;+6
+	STA <$00	; +3
+	LDX #$FF	; +2
+	STX <$01	; +3
+	LDA #37		; +2
+	SEC			; +2
+	SBC <$00	; +3
+	STA <$00	; +3
+	JMP [$0000]	; 5 + A + 6
+;;;;;;;;;;;;;;;;;
 
 	.org $FF00
 Clockslide:
@@ -4662,72 +4707,61 @@ Clockslide_14:
 Clockslide_12:
 	.byte $60
 ;;;;;;;;;;;;;
-	; Even larger clockslides!
-Clockslide_100:       ;=6
-	JSR Clockslide_38 ;=44
-	JSR Clockslide_50 ;=94
-	RTS			      ;=100
-;;;;;;;
-Clockslide_500:        ;=6
-	JSR Clockslide_38  ;=44
-	JSR Clockslide_50  ;=94
-	JSR Clockslide_100 ;=194
-	JSR Clockslide_100 ;=294
-	JSR Clockslide_100 ;=394
-	JSR Clockslide_100 ;=494
-	RTS			       ;=500
-;;;;;;;
-Clockslide_3000:       ;=6
-	JSR Clockslide_38  ;=44
-	JSR Clockslide_50  ;=94
-	JSR Clockslide_100 ;=194
-	JSR Clockslide_100 ;=294
-	JSR Clockslide_100 ;=394
-	JSR Clockslide_100 ;=494
-	JSR Clockslide_500 ;=0994
-	JSR Clockslide_500 ;=1494
-	JSR Clockslide_500 ;=1994
-	JSR Clockslide_500 ;=2494
-	JSR Clockslide_500 ;=2994
-	RTS			       ;=3000
-;;;;;;;
-;A frame has about 29780 cycles, so let's make a few around that number.
-Clockslide_29750:		;=6
-	JSR Clockslide_38 	;=44
-	JSR Clockslide_100	;=144
-	JSR Clockslide_100	;=244
-	JSR Clockslide_500	;=744
-	JSR Clockslide_500	;=1244
-	JSR Clockslide_500	;=1744
-	JSR Clockslide_500	;=2244
-	JSR Clockslide_500	;=2744
-	JSR Clockslide_3000	;=5744
-	JSR Clockslide_3000	;=8744
-	JSR Clockslide_3000	;=11744
-	JSR Clockslide_3000	;=14744
-	JSR Clockslide_3000	;=17744
-	JSR Clockslide_3000	;=20744
-	JSR Clockslide_3000	;=23744
-	JSR Clockslide_3000	;=26744
-	JSR Clockslide_3000	;=29744
-	RTS					;=29750
-;;;;;;;
-Clockslide_29780:		;=6
-	JSR Clockslide_18	;=24
-	JSR Clockslide_29750;=29774
-	RTS					;=29780
-;;;;;;;
-Clockslide36_Plus_A:;+6
-	STA <$00	; +3
-	LDX #$FF	; +2
-	STX <$01	; +3
-	LDA #37		; +2
-	SEC			; +2
-	SBC <$00	; +3
-	STA <$00	; +3
-	JMP [$0000]	; 5 + A + 6
-;;;;;;;;;;;;;;; ;
 
+
+DMASync: ; This also needs to be away from page boundaries.
+	LDA #$80
+	STA $4010 ; Enable DMC IRQ
+	LDA #$00
+	STA $4013 ; Length = 0 (+1)
+	STA $4015 ; Disable DMC
+	LDA #$10
+	STA $4015 ; Enable DMC (clear the DMC buffer)
+	NOP
+	STA $4015 ; Enable DMC a second time.
+sync_dmc_loop:
+	BIT $4015
+	BNE sync_dmc_loop ; wait for DMC Interrupt
+	NOP
+	NOP
+	NOP
+	LDA #$E2
+	BNE sync_dmc_first ; branch always to sync_dmc_first
+sync_dmc_wait:
+	LDA #$E3
+sync_dmc_first:
+	NOP
+	NOP
+	NOP
+	NOP
+	SEC
+	SBC #$01
+	BNE sync_dmc_first
+	LDA #$10
+	STA $4015
+	NOP
+	BIT $4015
+	BNE sync_dmc_wait
+	; The DMA is now synced!
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	NOP
+	LDX #$A3
+	LDA #$03
+sync_dmc_loop2:
+	DEX
+	BNE sync_dmc_loop2
+	SEC
+	SBC #$01
+	BNE sync_dmc_loop2
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	LDA #$10
+	STA $4015 ; start DMC
+	LDA #$10
+	STA $4015 ; start DMC again
+	RTS ; You got 3404 cycles until the DMA, and this RTS takes 6 of them.
+	; in other words, 3398 cycles after this RTS, a DMA will occur.
 
 
 
