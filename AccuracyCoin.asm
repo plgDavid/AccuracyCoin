@@ -1449,25 +1449,21 @@ TEST_UnofficialInstructions_SHS_Continue:
 	STX $501
 	LDA #$33
 	STA $500
-	; The stack pointer *should* be $F6
+	LDX #$82
+	TXS
+	; The stack pointer is now $83 for this test.
 	.byte $BB ; LAE $500
 	.word $0500 
 	; A = StackPointer & Immediate
 	; And then transfer A to X and StackPointer.
-	; So let's fix the stakc pointer first.
-	TSX
-	CPX $0501
-	BNE TEST_UnofficialInst_2
-	; The stack pointer was unchanged?!
-	JMP TEST_Fail
-TEST_UnofficialInst_2:
+	; So let's fix the stack pointer first.
 	STX <$FD
 	LDX $501
 	TXS	; Fix the stack pointer
-	CMP #$32
+	CMP #$02
 	BNE TEST_Fail6
 	LDX <$FD
-	CPX #$32
+	CPX #$02
 	BNE TEST_Fail6
 	; LAE exists!
 	INC <currentSubTest
