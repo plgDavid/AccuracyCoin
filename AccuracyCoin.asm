@@ -187,6 +187,9 @@ result_UnOp_LAE_BB = $44B
 result_DMA_Plus_2007R = $44C
 
 
+result_FFFF_Plus_X_Wraparound = $44D
+
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -360,7 +363,7 @@ Suite_CPUBehavior:
 	table "ROM is not writable", $FF, result_ROMnotWritable, TEST_ROMnotWritable
 	table "RAM Mirroring", $FF, result_RAMMirror, TEST_RamMirroring
 	table "PPU Register Mirroring", $FF, result_PPURegMirror, TEST_PPURegMirroring
-	table "$FFFF + X Wraparound", $FF, $result_Unimplemented, DebugTest
+	table "$FFFF + X Wraparound", $FF, result_FFFF_Plus_X_Wraparound, Test_FFFF_Plus_X_Wraparound
 	table "Dummy read cycles", $FF, result_DummyReads, TEST_DummyReads
 	table "Dummy write cycles", $FF, result_DummyWrites, TEST_DummyWrites
 	table "Open Bus", $FF, result_OpenBus, TEST_OpenBus
@@ -482,23 +485,23 @@ Suite_UnofficialOps_Immediates:
 	;; CPU Interrupts ;;
 Suite_CPUInterrupts:
 	.byte "CPU Interrupts by Blargg", $FF
-	table "CLI Latency", $FF, $result_Unimplemented, DebugTest
-	table "NMI AND BRK", $FF, $result_Unimplemented, DebugTest
-	table "NMI AND IRQ", $FF, $result_Unimplemented, DebugTest
-	table "IRQ AND DMA", $FF, $result_Unimplemented, DebugTest
-	table "Branch delays IRQ", $FF, $result_Unimplemented, DebugTest
+	table "CLI Latency", $FF, result_Unimplemented, DebugTest
+	table "NMI AND BRK", $FF, result_Unimplemented, DebugTest
+	table "NMI AND IRQ", $FF, result_Unimplemented, DebugTest
+	table "IRQ AND DMA", $FF, result_Unimplemented, DebugTest
+	table "Branch delays IRQ", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
 	;; DMA Tests ;;
 Suite_DMATests:
 	.byte "DMA tests", $FF	
 	table "DMA + $2007 Read", $FF, result_DMA_Plus_2007R, TEST_DMA_Plus_2007R
-	table "DMA + $2007 Write", $FF, $result_Unimplemented, DebugTest
-	table "DMA + $4016 Read", $FF, $result_Unimplemented, DebugTest
-	table "DMC DMA + OAM DMA", $FF, $result_Unimplemented, DebugTest
-	table "DMC DMA Implicit Stop", $FF, $result_Unimplemented, DebugTest
-	table "DMC DMA Explicit Stop", $FF, $result_Unimplemented, DebugTest
-	table "APU Register Activation", $FF, $result_Unimplemented, DebugTest
+	table "DMA + $2007 Write", $FF, result_Unimplemented, DebugTest
+	table "DMA + $4016 Read", $FF, result_Unimplemented, DebugTest
+	table "DMC DMA + OAM DMA", $FF, result_Unimplemented, DebugTest
+	table "DMC DMA Implicit Stop", $FF, result_Unimplemented, DebugTest
+	table "DMC DMA Explicit Stop", $FF, result_Unimplemented, DebugTest
+	table "APU Register Activation", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
 	;; Power On State ;;
@@ -514,8 +517,8 @@ Suite_PowerOnState:
 	;; PPU Stuff ;;
 Suite_PPUBehavior:
 	.byte "PPU Behavior", $FF
-	table "$2002 Race condition", $FF, $result_Unimplemented, DebugTest
-	table "Palette Corruption", $FF, $result_Unimplemented, DebugTest
+	table "$2002 Race condition", $FF, result_Unimplemented, DebugTest
+	table "Palette Corruption", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
 
@@ -3252,18 +3255,46 @@ TEST_DMA_Plus_2007R:
 TEST_Fail7:
 	JSR ResetScroll
 	JSR WaitForVBlank
+TEST_Fail8:
 	JSR EnableRendering	
 	JMP TEST_Fail
 
-
-
-
-
-
-
-
-
+Test_FFFF_Plus_X_Wraparound:
+	;;; Test 1 [$FFFF + X Wraparound]: LDA $FFFF + X (X=1) wraps around to $0000 ;;;
+	LDA #$5A
+	STA <$00
+	LDX #$01
+	LDA $FFFF,X
+	CMP #$5A
+	BNE TEST_Fail8
+	INC <currentSubTest
+	;;; Test 2 [$FFFF + X Wraparound]: LDA $FFFF + Y (Y=1) wraps around to $0000 ;;;
+	LDA #$A5
+	STA <$00
+	LDY #$01
+	LDA $FFFF,Y
+	CMP #$A5
+	BNE TEST_Fail8
+	INC <currentSubTest
+	;;; Test 3 [$FFFF + X Wraparound]: Branching from $FFF4 to $0050 ;;;
+	; Depending on poor implementation, this very-well might crash an emulator.
+	LDA #$F0
+	STA <$50
+	LDA #$A7
+	STA <$51
+	JSR TEST_FFFF_Branch_Wraparound
+	INC <currentSubTest
+	;;; Test 4 [$FFFF + X Wraparound]: Executing from $FFFF to $0000 ;;;
+	LDA #$00
+	STA <$00
+	LDA #$60
+	STA <$01
+	JSR $FFFF ; .word $0600 = ASL <$00; $00 = 60, RTS
 	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
 	
 	.bank 3
 	.org $F000
@@ -4443,6 +4474,13 @@ Clockslide36_Plus_A:;+6
 
 
 	.bank 3
+	.org $FFF5
+TEST_FFFF_Branch_Wraparound:
+	; A = 0, so this branch to $0050 is always taken.
+	LDA #0
+	.byte $F0, $57; BNE $0050
+	RTS
+;;;;;;;
 	.org $FFFA	; Interrupt vectors go here:
 	.word $0700 ; NMI
 	.word RESET ; Reset
