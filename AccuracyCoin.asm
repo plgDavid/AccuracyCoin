@@ -971,7 +971,7 @@ TEST_DummyWrites_Prep:
 	LDA #0
 	STA $2006
 	TAX
-	LDY #8
+	LDY #10
 TEST_DummyWritesPrepLoop:
 	STX $2007
 	INX
@@ -1005,6 +1005,7 @@ TEST_DummyWrites:
 	ASL $2007 ; This should move the v register 3 times, to 2403. Except it won't in every case.
 	LDA $2007 ; You see, repeated writes to $2007 have different behavior depending on the CPU/PPU clock alignment. 
 	LDA $2007 ;
+	LDA $2007 ;
 	LDA $2007 ;  A >= 5
 	CMP #$05  ; Instead of checking for a specific number, just check for the failure case.
 	BMI TEST_FailDummyWrites	
@@ -1021,9 +1022,9 @@ TEST_DummyWrites:
 	STA $502
 	LDA #$60
 	STA $503
-	LDY #0
 	JSR ResetScroll
 	JSR WaitForVBlank
+	LDY #0
 TEST_DummyWrites_Test2Loop:
 	JSR TEST_DummyWrites_Prep
 	TYA		; Get Y into the upper nybble of A
@@ -1033,11 +1034,13 @@ TEST_DummyWrites_Test2Loop:
 	ASL A
 	ORA #$E	; and set the low nybble to E
 	STA $500
-	LDA $2007 ; refresh buffer
+	LDA $2007 ; refresh the ppu buffer
+	LDX #0
 	JSR $500 ; run the test.
-	LDA $2007 	; A >= 5
+	LDA $2007 	; 
 	LDA $2007	;
 	LDA $2007	;
+	LDA $2007   ; A >= 5
 	CMP #$05	; else, fail the test.
 	BMI TEST_FailDummyWrites
 	INY
