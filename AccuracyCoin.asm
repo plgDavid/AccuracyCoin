@@ -2143,7 +2143,7 @@ TEST_AddrInitAXYFS_PreLoop:
 	JSR FixRTS
 	JSR TEST_UnOpRunTest
 	; Evaluating the test.
-	LDA #1
+	LDA <initialSubTest
 	STA <currentSubTest	
 	JSR Test_UnOpEvaluateResultsIncludingStackPointer
 	; If you made it this far, we passed this test!
