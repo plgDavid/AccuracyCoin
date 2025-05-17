@@ -2038,18 +2038,18 @@ Test_UnOpEvaluateResults_StartA:
 	RTS ; Pass!
 FAIL_UnOpTest:
 	; Uncomment this to print the value that failed, and the expected value. Really only works for error 1.
-	PHA
-	JSR WaitForVBlank
-	LDA #$23
-	STA $2006
-	LDA #$70
-	STA $2006
-	PLA
-	JSR PrintByte
-	LDA #$24
-	STA $2007
-	LDA <Test_UnOp_ValueAtAddressResult
-	JSR PrintByte
+	;PHA
+	;JSR WaitForVBlank
+	;LDA #$23
+	;STA $2006
+	;LDA #$70
+	;STA $2006
+	;PLA
+	;JSR PrintByte
+	;LDA #$24
+	;STA $2007
+	;LDA <Test_UnOp_ValueAtAddressResult
+	;JSR PrintByte
 
 	PLA	; Pull of the Return Address
 	PLA	;
@@ -4606,27 +4606,24 @@ SetUpNMIRoutineForMainMenu:
 
 DMASync_50CyclesRemaining:
 	JSR DMASync
-	; the DMA is in 3398 cycles;
-	JSR Clockslide_3000
-	JSR Clockslide_100
-	JSR Clockslide_100
-	JSR Clockslide_100
-	LDA #16 ;+2
-	JSR Clockslide36_Plus_A
-	RTS ; 50 cycles after this RTS, a DMA will occur.
+	; the DMA is in 406 cycles;
+	JSR Clockslide_100 ; 406 -> 306
+	JSR Clockslide_100 ; 306 -> 206
+	JSR Clockslide_100 ; 206 -> 106
+	JSR Clockslide_50  ; 106 -> 56
+	RTS ; 56 -> 50 cycles after this RTS, a DMA will occur.
 	
 DMASync_50MinusACyclesRemaining:
 	JSR DMASync
-	; the DMA is in 3398 cycles;
-	JSR Clockslide_3000
-	JSR Clockslide_100
-	JSR Clockslide_100
-	JSR Clockslide_50
-	JSR Clockslide_49
-	JSR Clockslide_16 ; there is no clockSlide 13, so...
-	LDA <Test_UnOp_CycleDelayPostDMA ; +3
-	JSR Clockslide36_Plus_A
-	RTS ; 50-A cycles after this RTS, a DMA will occur.
+	; the DMA is in 400 cycles;
+	JSR Clockslide_100 ; 406 -> 306
+	JSR Clockslide_100 ; 306 -> 206
+	JSR Clockslide_50 ; 206 -> 156
+	JSR Clockslide_40 ; 156 -> 116
+	JSR Clockslide_21 ; 116 -> 95
+	LDA <Test_UnOp_CycleDelayPostDMA ; 95 -> 92
+	JSR Clockslide36_Plus_A	; 92 -> (56-A)
+	RTS ; (56-A) -> (50-A) cycles after this RTS, a DMA will occur.
 
 	; various clockslides
 Clockslide_100:       ;=6
@@ -4784,62 +4781,35 @@ Clockslide_12:
 	.byte $60
 ;;;;;;;;;;;;;
 
-
-DMASync: ; This also needs to be away from page boundaries.
-	LDA #$80
-	STA $4010 ; Enable DMC IRQ
-	LDA #$00
-	STA $4013 ; Length = 0 (+1)
-	STA $4015 ; Disable DMC
+DMASync:
+	STA <Copy_A
+	LDA #$4F ; loop, max speed.
+	STA $4010
+	LDA #0
+	STA $4011 ; minimum value of DMC
+	LDA #$FF
+	STA $4012 ; Sample address $FFC0.
+	LDA #1
+	STA $4013 ; #1 * 16 + 1 = 17 byte length.
 	LDA #$10
-	STA $4015 ; Enable DMC (clear the DMC buffer)
-	NOP
-	STA $4015 ; Enable DMC a second time.
-sync_dmc_loop:
-	BIT $4015
-	BNE sync_dmc_loop ; wait for DMC Interrupt
+	STA $4015 ; Start the DMC DMA loop
 	NOP
 	NOP
-	NOP
-	LDA #$E2
-	BNE sync_dmc_first ; branch always to sync_dmc_first
-sync_dmc_wait:
-	LDA #$E3
-sync_dmc_first:
-	NOP
-	NOP
-	NOP
-	NOP
-	SEC
-	SBC #$01
-	BNE sync_dmc_first
-	LDA #$10
-	STA $4015
-	NOP
-	BIT $4015
-	BNE sync_dmc_wait
-	; The DMA is now synced!
-	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
-	NOP
-	LDX #$A3
-	LDA #$03
-sync_dmc_loop2:
-	DEX
-	BNE sync_dmc_loop2
-	SEC
-	SBC #$01
-	BNE sync_dmc_loop2
-	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
-	LDA #$10
-	STA $4015 ; start DMC
-	LDA #$10
-	STA $4015 ; start DMC again
-	RTS ; You got 3404 cycles until the DMA, and this RTS takes 6 of them.
-	; in other words, 3398 cycles after this RTS, a DMA will occur.
-
-
+DMASync_Loop:
+	LDA $4000 ; Open bus! Either we will read $40 from the hgih byte, or $00 from the DMA.
+	;	[Read AD] [Read 00] [Read 40] [DMA PUT (1)] [DMA GET (2)] [DMA PUT (3)] [DMA GET (4)] [Read open bus (5)]
+	BNE DMASync_Loop ; If the DMA occurs, LDA $4000 will read $00 ; +2 (7)
+	LDA #$0F ; don't loop, continue at max speed. ; +2 (9)
+	STA $4010 ; +4 (13)
+	LDA <$00  ; +3 (16)
+	LDA Copy_A; +4 (20)
+	RTS 	  ; +6 (26)
+	; the next DMA is at (432) cycles, so we have 406 cycles to go.
+	
+	
+	.org $FFC0
+	; 17 00s
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 
 	.bank 3
 	.org $FFF5
