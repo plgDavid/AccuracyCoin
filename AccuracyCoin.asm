@@ -2674,22 +2674,27 @@ TEST_SHA_93:
 	LDA #PostDMACyclesUntilTestInstruction+3
 	STA <Test_UnOp_CycleDelayPostDMA	
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
+	LDA #$FF
+	STA <$00 ; For checking behavior 1
+	STA $0A00 ; For checking behavior 2
 	LDA #$F0
 	STA <Test_UnOp_IndirectPointerLo
-	LDA #$1D
+	LDA #$1E
 	STA <Test_UnOp_IndirectPointerHi
-	LDA #$02
-	LDX #$FF
+	LDA #$55
+	LDX #$AA
 	LDY #$10
 	.byte $93, Test_UnOp_IndirectPointerLo
-	LDA $1E00
-	CMP #$02
-	BEQ TEST_SHA_Behavior2_93_JMP
-	LDA $200
-	CMP #$02
-	BEQ TEST_SHA_Behavior1_93_JMP
-	LDA #$02
-	RTS
+	; Behavior 1: Hi = ($1E+1) & $55 & $AA = 0	:: write ($1E+1) & $55 & $AA = 0
+	; Behavior 2: Hi = ($1E+1) & $AA = 0A		:: ($1E+1) & $55 & ($AA | MAGIC) = ?? & $1F (we don't know what MAGIC is, but the result must be $1F or less)
+	LDA $0A00
+	CMP #$FF
+	BNE TEST_SHA_Behavior2_93_JMP ; if address $0A00 was updated, this is behavior 2.
+	LDA <$00
+	CMP #$00
+	BEQ TEST_SHA_Behavior1_93_JMP ; if address $0000 was updated, this is behavior 1.
+	LDA #$02 ; And if address $1F00 was changed, or of nothing happened at all, this failed.
+	RTS		 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
 	
 TEST_SHA_Behavior2_93_JMP:
 	JMP TEST_SHA_Behavior2_93
@@ -2700,18 +2705,23 @@ TEST_SHA_9F:
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
-	LDA #$02
-	LDX #$FF
+	LDA #$FF
+	STA <$00 ; For checking behavior 1
+	STA $0A00 ; For checking behavior 2
+	LDA #$55
+	LDX #$AA
 	LDY #$10
-	.byte $9F, $F0, $1D
-	LDA $1E00
-	CMP #$02
-	BEQ TEST_SHA_Behavior2_9F_JMP
-	LDA $200
-	CMP #$02
-	BEQ TEST_SHA_Behavior1_9F_JMP
-	LDA #$02
-	RTS
+	.byte $9F, $F0, $1E
+	; Behavior 1: Hi = ($1E+1) & $55 & $AA = 0	:: write ($1E+1) & $55 & $AA = 0
+	; Behavior 2: Hi = ($1E+1) & $AA = 0A		:: ($1E+1) & $55 & ($AA | MAGIC) = ?? & $1F (we don't know what MAGIC is, but the result must be $1F or less)
+	LDA $0A00
+	CMP #$FF
+	BNE TEST_SHA_Behavior2_9F_JMP ; if address $0A00 was updated, this is behavior 2.
+	LDA <$00
+	CMP #$00
+	BEQ TEST_SHA_Behavior1_9F_JMP ; if address $0000 was updated, this is behavior 1.
+	LDA #$02 ; And if address $1F00 was changed, or of nothing happened at all, this failed.
+	RTS 	 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
 	
 TEST_SHA_Behavior2_9F_JMP:
 	JMP TEST_SHA_Behavior2_9F
@@ -2906,22 +2916,27 @@ TEST_SHS_9B:
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
+	LDA #$FF
+	STA <$00 ; For checking behavior 1
+	STA $0A00 ; For checking behavior 2
 	TSX
 	STX <Copy_SP
-	LDA #$02
-	LDX #$FF
+	LDA #$55
+	LDX #$AA
 	LDY #$10
-	.byte $9F, $F0, $1D
+	.byte $9B, $F0, $1E
+	; Behavior 1: Hi = ($1E+1) & $55 & $AA = 0	:: write ($1E+1) & $55 & $AA = 0
+	; Behavior 2: Hi = ($1E+1) & $AA = 0A		:: ($1E+1) & $55 & ($AA | MAGIC) = ?? & $1F (we don't know what MAGIC is, but the result must be $1F or less)
 	LDX <Copy_SP
 	TXS
-	LDA $1E00
-	CMP #$02
-	BEQ TEST_SHS_Behavior2_9B_JMP
-	LDA $200
-	CMP #$02
-	BEQ TEST_SHS_Behavior1_9B
-	LDA #$02
-	RTS
+	LDA $A00
+	CMP #$FF
+	BNE TEST_SHS_Behavior2_9B_JMP ; if address $0A00 was updated, this is behavior 2.
+	LDA <$00
+	CMP #$00
+	BEQ TEST_SHS_Behavior1_9B ; if address $0000 was updated, this is behavior 1.
+	LDA #$02 ; And if address $1F00 was changed, or of nothing happened at all, this failed.
+	RTS		 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
 	
 TEST_SHS_Behavior2_9B_JMP:
 	JMP TEST_SHS_Behavior2_9B
