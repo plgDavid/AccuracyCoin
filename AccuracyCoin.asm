@@ -449,7 +449,7 @@ Suite_UnofficialOps_DCP:
 	table "$BF   DCP absolute,X", $FF, result_UnOp_DCP_DF, TEST_DCP_DF
 	.byte $FF
 	
-	;; Unofficial Instructions: DCP ;;
+	;; Unofficial Instructions: ISC ;;
 Suite_UnofficialOps_ISC:
 	.byte "Unofficial Instructions: ISC", $FF
 	table "$E3   ISC indirect,X", $FF, result_UnOp_ISC_E3, TEST_ISC_E3
@@ -1716,7 +1716,7 @@ TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $0580
 	LDX <Copy_X ; restore X for the test.
 	LDA <Test_UnOp_FlagsInit
 	PHA
-	LDA <Copy_A	
+	LDA <Test_UnOp_A	
 	PLP	; Get init flags ready for the test. The T flag isn't a concern.
 TEST_UnOp_RamFuncTest: ; Ram Function TEST
 	NOP	; Overwrite this with the test.
