@@ -30,6 +30,7 @@ byte9 = $9
 
 byteF = $F; immediate use. Store something here and use it in the same function. If a JSR happens, assume this value is stale.
 currentSubTest = $10
+initialSubTest = $11
 menuTabXPos = $14
 menuCursorXPos = $15
 menuCursorYPos = $16
@@ -62,7 +63,7 @@ Test_UnOp_CPS = $2F
 Test_UnOp_IndirectPointerLo = $30
 Test_UnOp_IndirectPointerHi = $31
 Test_UnOp_CycleDelayPostDMA = $32
-PostDMACyclesUntilTestInstruction = 17
+PostDMACyclesUntilTestInstruction = 14
 
 
 Test_ZeroPageReserved = $50 ; through $5F
@@ -1705,6 +1706,7 @@ TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $0580
 	NOP	; These can be replaced with a JSR instruction.
 	NOP	; Certain operations have different behavior if a DMA occurs in the 2nd to last cycle.
 	NOP	; So those instructions might put a JSR here to set things up and precisely time time a DMA. 
+	LDY <Test_UnOp_Y
 	TSX			; Some unofficial instructions modify the stack pointer
 	STX <Copy_SP; make a copy of the stack pointer
 	LDX <Test_UnOp_SP
@@ -2036,18 +2038,18 @@ Test_UnOpEvaluateResults_StartA:
 	RTS ; Pass!
 FAIL_UnOpTest:
 	; Uncomment this to print the value that failed, and the expected value. Really only works for error 1.
-	;PHA
-	;JSR WaitForVBlank
-	;LDA #$23
-	;STA $2006
-	;LDA #$70
-	;STA $2006
-	;PLA
-	;JSR PrintByte
-	;LDA #$24
-	;STA $2007
-	;LDA <Test_UnOp_ValueAtAddressResult
-	;JSR PrintByte
+	PHA
+	JSR WaitForVBlank
+	LDA #$23
+	STA $2006
+	LDA #$70
+	STA $2006
+	PLA
+	JSR PrintByte
+	LDA #$24
+	STA $2007
+	LDA <Test_UnOp_ValueAtAddressResult
+	JSR PrintByte
 
 	PLA	; Pull of the Return Address
 	PLA	;
@@ -2110,7 +2112,7 @@ TEST_AddrInitAXYF_PreLoop2:
 	JSR FixRTS
 	JSR TEST_UnOpRunTest
 	; Evaluating the test.
-	LDA #1
+	LDA <initialSubTest
 	STA <currentSubTest	
 	JSR Test_UnOpEvaluateResults
 	; If you made it this far, we passed this test!
@@ -2667,7 +2669,7 @@ TEST_ISC:
 
 
 TEST_SHA_93:
-	LDA #PostDMACyclesUntilTestInstruction+5
+	LDA #PostDMACyclesUntilTestInstruction+3
 	STA <Test_UnOp_CycleDelayPostDMA	
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
 	LDA #$F0
@@ -2782,15 +2784,25 @@ TEST_SHA_Behavior1:
 	;	   = $0D & $15 & $1F
 	;	   = 5
 	
-	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
-	; LDA #$20
-	; STA $0580
-	; LDA #Low(DMASync_50MinusACyclesRemaining)
-	; STA $0581
-	; LDA #High(DMASync_50MinusACyclesRemaining)
-	; STA $0582		
+	; And now to test if the value written is still ANDed with H if the cycle before the write had a DMA.
+	PHA
+	LDA #$20
+	STA $0580
+	LDA #Low(DMASync_50MinusACyclesRemaining)
+	STA $0581
+	LDA #High(DMASync_50MinusACyclesRemaining)
+	STA $0582	
+	LDA #$6
+	STA <initialSubTest	; The following test will give error codes, 6, 7, 8, 9, and A. Error code 6 is probably the only one that will show up.
+	PLA
 	
-	; TODO: this.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $5A
+	.byte $8F, $FF, $00, (flag_i)
+	.word $0500
+	.byte $8F	; H isn't part of the equation anymore.
+	.byte $8F, $FF, $00, (flag_i)
 	
 ;; END OF TEST ;;
 	JSR WaitForVBlank
@@ -2842,13 +2854,26 @@ TEST_SHA_Behavior2:
 	.byte $0A, $FF, $80, (flag_i | flag_c | flag_z | flag_v)
 	; the high byte will only be ANDed with X (FF in this case)
 	
-	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
-	; LDA #$20
-	; STA $0580
-	; LDA #Low(DMASync_50MinusACyclesRemaining)
-	; STA $0581
-	; LDA #High(DMASync_50MinusACyclesRemaining)
-	; STA $0582	
+	; And now to test if the value written is still ANDed with H if the cycle before the write had a DMA.
+	PHA
+	LDA #$20
+	STA $0580
+	LDA #Low(DMASync_50MinusACyclesRemaining)
+	STA $0581
+	LDA #High(DMASync_50MinusACyclesRemaining)
+	STA $0582	
+	LDA #$6
+	STA <initialSubTest	; The following test will give error codes, 6, 7, 8, 9, and A. Error code 6 is probably the only one that will show up.
+	PLA
+	
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $5A
+	.byte $8F, $FF, $00, (flag_i)
+	.word $0500
+	.byte $8F	; H isn't part of the equation anymore.
+	.byte $8F, $FF, $00, (flag_i)
+	
 	
 	JSR WaitForVBlank
 	LDA #0
@@ -2950,6 +2975,25 @@ TEST_SHS_Behavior1_9B:
 	;	   = $0D & $15 & $1F
 	;	   = 5
 	
+	PHA
+	LDA #$20
+	STA $0580
+	LDA #Low(DMASync_50MinusACyclesRemaining)
+	STA $0581
+	LDA #High(DMASync_50MinusACyclesRemaining)
+	STA $0582	
+	LDA #$7
+	STA <initialSubTest	; The following test will give error codes, 7, 8, 9, A, B, and C. Error code 7 is probably the only one that will show up.
+	PLA
+	
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $0500
+	.byte $5A
+	.byte $8F, $FF, $00, (flag_i), $8F
+	.word $0500
+	.byte $8F
+	.byte $8F, $FF, $00, (flag_i), $8F
+	
 ;; END OF TEST ;;
 	JSR WaitForVBlank
 	LDA #0
@@ -2987,6 +3031,26 @@ TEST_SHS_Behavior2_9B:
 	.byte $0A
 	.byte $0A, $FF, $80, (flag_i | flag_c | flag_z | flag_v), $0A
 
+	PHA
+	LDA #$20
+	STA $0580
+	LDA #Low(DMASync_50MinusACyclesRemaining)
+	STA $0581
+	LDA #High(DMASync_50MinusACyclesRemaining)
+	STA $0582	
+	LDA #$7
+	STA <initialSubTest	; The following test will give error codes, 7, 8, 9, A, B, and C. Error code 7 is probably the only one that will show up.
+	PLA
+	
+	JSR TEST_RunTest_AddrInitAXYFS
+	.word $0500
+	.byte $5A
+	.byte $8F, $FF, $00, (flag_i), $8F
+	.word $0500
+	.byte $8F
+	.byte $8F, $FF, $00, (flag_i), $8F
+
+
 ;; END OF TEST ;;
 	JSR WaitForVBlank
 	LDA #0
@@ -3010,9 +3074,6 @@ TEST_SHS_Behavior2_9B:
 	JSR ResetScroll
 	LDA #1
 	RTS
-
-	
-
 
 TEST_SHY_9C:
 	LDA #PostDMACyclesUntilTestInstruction+4
@@ -3044,23 +3105,26 @@ TEST_SHY_9C:
 	.byte $05
 	.byte $77, $80, $05, (flag_i)
 
-	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
+	; And now to test if the value written is still ANDed with H if the cycle before the write had a DMA.
+	PHA
 	LDA #$20
 	STA $0580
 	LDA #Low(DMASync_50MinusACyclesRemaining)
 	STA $0581
 	LDA #High(DMASync_50MinusACyclesRemaining)
 	STA $0582	
+	LDA #$6
+	STA <initialSubTest	; The following test will give error codes, 6, 7, 8, 9, and A. Error code 6 is probably the only one that will show up.
+	PLA
 	
-	;JSR TEST_RunTest_AddrInitAXYF
-	;.word $0550
-	;.byte $7F
-	;.byte $00, $5A, $00, (flag_i)
-	;.word $0550
-	;.byte $5A
-	;.byte $00, $5A, $00, (flag_i)
-
-	; I honestly cannot tell if this is still writing somewhere, but it sure isn't where I thought it would be.
+	; SHY just becomes STY if a DMA occurs on the right cpu cycle.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $5A
+	.byte $80, $00, $A5, (flag_i)
+	.word $0500
+	.byte $A5	; H isn't part of the equation anymore.
+	.byte $80, $00, $A5, (flag_i)
 
 	;; END OF TEST ;;
 	LDA #1
@@ -3096,24 +3160,26 @@ TEST_SHX_9E:
 	.byte $05
 	.byte $77, $05, $80, (flag_i)
 
-	; And now to test if the high byte instability occurs if the cycle before the write had a DMA.
+	; And now to test if the value written is still ANDed with H if the cycle before the write had a DMA.
+	PHA
 	LDA #$20
 	STA $0580
 	LDA #Low(DMASync_50MinusACyclesRemaining)
 	STA $0581
 	LDA #High(DMASync_50MinusACyclesRemaining)
 	STA $0582	
+	LDA #$6
+	STA <initialSubTest	; The following test will give error codes, 6, 7, 8, 9, and A. Error code 6 is probably the only one that will show up.
+	PLA
 	
-	;JSR TEST_RunTest_AddrInitAXYF
-	;.word $0550
-	;.byte $7F
-	;.byte $00, $5A, $00, (flag_i)
-	;.word $0550
-	;.byte $5A
-	;.byte $00, $5A, $00, (flag_i)
-
-	; I honestly cannot tell if this is still writing somewhere, but it sure isn't where I thought it would be.
-
+	; SHX just becomes STX if a DMA occurs on the right cpu cycle.
+	JSR TEST_RunTest_AddrInitAXYF
+	.word $0500
+	.byte $5A
+	.byte $80, $A5, $00, (flag_i)
+	.word $0500
+	.byte $A5	; H isn't part of the equation anymore.
+	.byte $80, $A5, $00, (flag_i)
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -3497,11 +3563,20 @@ Test_FFFF_Plus_X_Wraparound:
 	INC <currentSubTest
 	;;; Test 3 [$FFFF + X Wraparound]: Branching from $FFF4 to $0050 ;;;
 	; Depending on poor implementation, this very-well might crash an emulator.
-	LDA #$F0
+	LDA #$E6
 	STA <$50
-	LDA #$A7
+	LDA #$55
 	STA <$51
+	LDA #$80
+	STA <$55
+	LDA #$D0
+	STA <$52
+	LDA #$A5
+	STA <$53
 	JSR TEST_FFFF_Branch_Wraparound
+	LDA <$55
+	CMP #$81
+	BNE TEST_Fail8
 	INC <currentSubTest
 	;;; Test 4 [$FFFF + X Wraparound]: Executing from $FFFF to $0000 ;;;
 	LDA #$00
@@ -4453,6 +4528,7 @@ RunTest:
 	JSR HighlightTest             ; and highlight it, since the cursor is still here.
 	LDA #1
 	STA <currentSubTest           ; set this to 1 before running any tests.
+	LDA <initialSubTest			  ; Some tests have multiple sets of tests to run, all using the same code. So writing here changes the test value.
 	LDA #$80
 	STA <Test_UnOp_SP			  ; Some tests might modify the stack pointer. The test will use a value of $80 just to be sure it's not overwriting other stack data.
 	JSR ResetScroll		          ; Reset the scroll before the test, since we just modified 'v' inside the previous subroutines.
@@ -4624,7 +4700,7 @@ Clockslide:
 	; JSR takes 6 cycles.
 	; The following bytes are labeled with the total cycles until the RTS instruction ends.
 	; Clockslide has a minimum of 12 cycles.
-	; EXAMPLE: Let's count CPU cycles!
+	; EXAMPLE USE: Let's count CPU cycles!
 	; LDA #00            ; +2 cycles
 	; STA $0100          ; +4 cycles
 	; JSR Clockslide_45  ; +45 cycles
@@ -4768,9 +4844,11 @@ sync_dmc_loop2:
 	.bank 3
 	.org $FFF5
 TEST_FFFF_Branch_Wraparound:
+	; This is part of test 3 of Test_FFFF_Plus_X_Wraparound
 	; A = 0, so this branch to $0050 is always taken.
 	LDA #0
 	.byte $F0, $57; BNE $0050
+	; Address $0050 is a branch to this RTS.
 	RTS
 ;;;;;;;
 	.org $FFFA	; Interrupt vectors go here:
