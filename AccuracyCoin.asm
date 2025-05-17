@@ -362,7 +362,7 @@ table .macro
 	;; CPU Behavior ;;
 Suite_CPUBehavior:
 	.byte "CPU Behavior", $FF
-	table "CPU Instructions", 		 $FF, result_CPUInstr, DebugTest
+	;table "CPU Instructions", 		 $FF, result_CPUInstr, DebugTest
 	table "Unofficial Instructions", $FF, result_UnofficialInstr, TEST_UnofficialInstructionsExist
 	table "ROM is not writable", 	 $FF, result_ROMnotWritable, TEST_ROMnotWritable
 	table "RAM Mirroring", 			 $FF, result_RAMMirror, TEST_RamMirroring
