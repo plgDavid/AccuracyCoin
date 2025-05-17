@@ -31,6 +31,7 @@ byte9 = $9
 byteF = $F; immediate use. Store something here and use it in the same function. If a JSR happens, assume this value is stale.
 currentSubTest = $10
 initialSubTest = $11
+result_DMADMASync_PreTest = $12
 menuTabXPos = $14
 menuCursorXPos = $15
 menuCursorYPos = $16
@@ -292,6 +293,8 @@ PostResetFlagTest:
 	LDA #0
 	STA $100 ; initialize the placeholder test results.
 	
+	JSR DMASync ; Initialize result_DMADMASync_PreTest
+	
 	LDA #$FF
 	STA <menuCursorYPos
 	
@@ -313,7 +316,6 @@ PostResetFlagTest:
 	LDA #High(Suite_CPUBehavior)
 	STA <suitePointer+1
 	JSR LoadSuiteMenu
-
 
 	JSR ResetScroll
 	JSR EnableRendering
@@ -4692,6 +4694,79 @@ Clockslide36_Plus_A:;+6
 	JMP [$0000]	; 5 + A + 6
 ;;;;;;;;;;;;;;;;;
 
+
+	
+	.org $FE87
+	
+DMASyncButSlightlyLessReliable:
+	; This fuction *should* exit with exactly 406 CPU cycles until the DMA occurs. It does on my console, but not so much for various emulators.
+	; But hey, this one doesn't rely on open bus, and won't infinite loop.
+	LDA #$80
+	STA $4010 ; Enable DMC IRQ
+	LDA #$00
+	STA $4013 ; Length = 0 (+1)
+	STA $4015 ; Disable DMC
+	LDA #$10
+	STA $4015 ; Enable DMC (clear the DMC buffer)
+	NOP
+	STA $4015 ; Enable DMC a second time.
+sync_dmc_loop:
+	BIT $4015
+	BNE sync_dmc_loop ; wait for DMC Interrupt
+	NOP
+	NOP
+	NOP
+	LDA #$E2
+	BNE sync_dmc_first ; branch always to sync_dmc_first
+sync_dmc_wait:
+	LDA #$E3
+sync_dmc_first:
+	NOP
+	NOP
+	NOP
+	NOP
+	SEC
+	SBC #$01
+	BNE sync_dmc_first
+	LDA #$10
+	STA $4015
+	NOP
+	BIT $4015
+	BNE sync_dmc_wait
+	; The DMA is now synced!
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	NOP
+	LDX #$A3
+	LDA #$03
+sync_dmc_loop2:
+	DEX
+	BNE sync_dmc_loop2
+	SEC
+	SBC #$01
+	BNE sync_dmc_loop2
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	LDA #$10
+	STA $4015 ; start DMC
+	LDA #$10
+	STA $4015 ; start DMC again
+			  ; 3404 CPU cycles intil the DMA.
+			  ; the objective is to RTS with 412 cycles, so post RTS is 406 cycles remaining.
+	JSR Clockslide_500 ; 3404 -> 2904
+	JSR Clockslide_500 ; 2904 -> 2404
+	JSR Clockslide_500 ; 2404 -> 1904
+	JSR Clockslide_500 ; 1904 -> 1404
+	JSR Clockslide_500 ; 1404 -> 904
+	JSR Clockslide_100 ; 904 -> 804
+	JSR Clockslide_100 ; 804 -> 704
+	JSR Clockslide_100 ; 704 -> 604
+	JSR Clockslide_100 ; 604 -> 504
+	JSR Clockslide_50 ; 504 -> 454
+	JSR Clockslide_42 ; 454 -> 412
+	RTS				  ; 412 -> 406
+	; the next DMA is at (432) cycles, so we have 406 cycles to go.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	.org $FF00
 Clockslide:
 	; JSR takes 6 cycles.
@@ -4782,6 +4857,14 @@ Clockslide_12:
 ;;;;;;;;;;;;;
 
 DMASync:
+	LDA <result_DMADMASync_PreTest ; Check if we need to run the "does the DMA update the data bus" test.
+	BEQ TEST_DoesTheDMAUpdateOpenBus ; if we haven't ran this yet, run this test, then return back here.
+	CMP #01
+	BEQ DMASync_TheGoodOne
+	JMP DMASyncButSlightlyLessReliable
+DMASync_TheGoodOne:
+	; This fuction very relaibly exits with exactly 406 CPU cycles until the DMA occurs.
+	; However, it relies on open bus behavior, with the consequence of an infinite loop if not correctly emulated.
 	STA <Copy_A
 	LDA #$4F ; loop, max speed.
 	STA $4010
@@ -4796,7 +4879,7 @@ DMASync:
 	NOP
 	NOP
 DMASync_Loop:
-	LDA $4000 ; Open bus! Either we will read $40 from the hgih byte, or $00 from the DMA.
+	LDA $4000 ; Open bus! Either we will read $40 from the high byte, or $00 from the DMA.
 	;	[Read AD] [Read 00] [Read 40] [DMA PUT (1)] [DMA GET (2)] [DMA PUT (3)] [DMA GET (4)] [Read open bus (5)]
 	BNE DMASync_Loop ; If the DMA occurs, LDA $4000 will read $00 ; +2 (7)
 	LDA #$0F ; don't loop, continue at max speed. ; +2 (9)
@@ -4805,10 +4888,42 @@ DMASync_Loop:
 	LDA Copy_A; +4 (20)
 	RTS 	  ; +6 (26)
 	; the next DMA is at (432) cycles, so we have 406 cycles to go.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	
+TEST_DoesTheDMAUpdateOpenBus:
+	; let's find out!
+	STA <Copy_A
+	LDA #$4F ; loop, max speed.
+	STA $4010
+	LDA #0
+	STA $4011 ; minimum value of DMC
+	LDA #$FF
+	STA $4012 ; Sample address $FFC0.
+	LDA #1
+	STA $4013 ; #1 * 16 + 1 = 17 byte length.
+	LDA #$10
+	STA $4015 ; Start the DMC DMA loop
+	LDX #0
+	LDY #0
+TEST_DoesTheDMA_Loop:
+	DEX
+	BNE TEST_DoesTheDMA_LoopPostDec
+	DEY
+	BEQ TEST_DoesTheDMA_Fail
+TEST_DoesTheDMA_LoopPostDec:
+	LDA $4000
+	BNE TEST_DoesTheDMA_Loop
+	LDA #01
+	STA <result_DMADMASync_PreTest
+	JMP DMASync
+TEST_DoesTheDMA_Fail:
+	LDA #02
+	STA <result_DMADMASync_PreTest
+	JMP DMASync
+;;;;;;;;;;;;;;;	
 	
 	.org $FFC0
-	; 17 00s
+	; 17 00s. This will be the DPCM "audio sample" played during the loop. It should just be silence.
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 
 	.bank 3
