@@ -2734,6 +2734,15 @@ TEST_SHA_Behavior1_93
 TEST_SHA_Behavior1_9F:
 	LDA #$9F
 TEST_SHA_Behavior1:
+	PHA
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $22B0
+	.byte " SHA Behavior 1", $FF
+	JSR ResetScrollAndWaitForVBlank
+	PLA
+
 	JSR TEST_UnOp_Setup; Set the opcode
 	; This test follows the documented behavior of these instructions. Most emulators probably go here.
 	; Special thanks to 8BitLord64 for help researching this.
@@ -2807,13 +2816,6 @@ TEST_SHA_Behavior1:
 	.byte $8F, $FF, $00, (flag_i)
 	
 ;; END OF TEST ;;
-	JSR WaitForVBlank
-	LDA #0
-	STA <dontSetPointer
-	JSR PrintTextCentered
-	.word $22B0
-	.byte " SHA Behavior 1", $FF
-	JSR ResetScroll
 	LDA #1
 	RTS
 	
@@ -2823,6 +2825,25 @@ TEST_SHA_Behavior2_93
 TEST_SHA_Behavior2_9F:
 	LDA #$9F
 TEST_SHA_Behavior2:
+	PHA
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $22B0
+	.byte " SHA Behavior 2", $FF
+	JSR PrintTextCentered
+	.word $2330
+	.byte "SHA magic = $", $FF
+	LDA #$FF
+	LDX #$00
+	LDY #$60
+	.byte $9F, $F0, $FE ; SHA $FEF0, Y
+	LDA <$50
+	JSR PrintByte
+	
+	JSR ResetScrollAndWaitForVBlank
+
+	PLA
 	JSR TEST_UnOp_Setup; Set the opcode
 	; This test follows the behavior of many consoles I tested, though differs from the documentation.
 	; Special thanks to GTAce, Fiskbit, and Lain for helping research this.
@@ -2876,24 +2897,7 @@ TEST_SHA_Behavior2:
 	.byte $8F	; H isn't part of the equation anymore.
 	.byte $8F, $FF, $00, (flag_i)
 	
-	
-	JSR WaitForVBlank
-	LDA #0
-	STA <dontSetPointer
-	JSR PrintTextCentered
-	.word $22B0
-	.byte " SHA Behavior 2", $FF
-	JSR PrintTextCentered
-	.word $2330
-	.byte "SHA magic = $", $FF
-	LDA #$FF
-	LDX #$00
-	LDY #$60
-	.byte $9F, $F0, $FE ; SHA $FEF0, Y
-	LDA <$50
-	JSR PrintByte
-	
-	JSR ResetScroll
+	;; END OF TEST ;;
 	LDA #1
 	RTS
 
@@ -2923,6 +2927,14 @@ TEST_SHS_Behavior2_9B_JMP:
 	JMP TEST_SHS_Behavior2_9B
 	
 TEST_SHS_Behavior1_9B:
+
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintTextCentered
+	.word $22D0
+	.byte " SHS Behavior 1", $FF
+	JSR ResetScrollAndWaitForVBlank
+
 	LDA #$9B
 	JSR TEST_UnOp_Setup; Set the opcode
 	; This test follows the documented behavior of these instructions. Most emulators probably go here.
@@ -2997,16 +3009,30 @@ TEST_SHS_Behavior1_9B:
 	.byte $8F, $FF, $00, (flag_i), $8F
 	
 ;; END OF TEST ;;
-	JSR WaitForVBlank
+	LDA #1
+	RTS
+TEST_SHS_Behavior2_9B:
+
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
 	.word $22D0
-	.byte " SHS Behavior 1", $FF
-	JSR ResetScroll
-	LDA #1
-	RTS
-TEST_SHS_Behavior2_9B:
+	.byte " SHS Behavior 2", $FF
+	JSR PrintTextCentered
+	.word $2350
+	.byte "SHS magic = $", $FF
+	TSX
+	STX <Copy_SP
+	LDA #$FF
+	LDX #$00
+	LDY #$60
+	.byte $9B, $F0, $FE ; SHS $FEF0, Y
+	LDX <Copy_SP
+	TXS
+	LDA <$50
+	JSR PrintByte
+	JSR ResetScrollAndWaitForVBlank
+
 	LDA #$9B
 	JSR TEST_UnOp_Setup; Set the opcode
 	JSR TEST_RunTest_AddrInitAXYFS
@@ -3054,26 +3080,6 @@ TEST_SHS_Behavior2_9B:
 
 
 ;; END OF TEST ;;
-	JSR WaitForVBlank
-	LDA #0
-	STA <dontSetPointer
-	JSR PrintTextCentered
-	.word $22D0
-	.byte " SHS Behavior 2", $FF
-	JSR PrintTextCentered
-	.word $2350
-	.byte "SHS magic = $", $FF
-	TSX
-	STX <Copy_SP
-	LDA #$FF
-	LDX #$00
-	LDY #$60
-	.byte $9B, $F0, $FE ; SHS $FEF0, Y
-	LDX <Copy_SP
-	TXS
-	LDA <$50
-	JSR PrintByte
-	JSR ResetScroll
 	LDA #1
 	RTS
 
