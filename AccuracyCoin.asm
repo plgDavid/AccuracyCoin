@@ -1514,7 +1514,7 @@ TEST_UnofficialInstructionsExist:
 	;;; Test D [Unofficial Instructions Exist]: Does SHA exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	; Test the unstable part too, why not.
-	LDA #$0D
+	LDA #$55
 	LDX #$FF
 	LDY #$80
 	.byte $9F ; SHA $0500
@@ -1528,7 +1528,7 @@ TEST_UnofficialInstructionsExist:
 	; H is the high byte of the target address +1.
 	; So we should write $05 to $0500
 	LDA $0500
-	CMP #$0D
+	CMP #$15
 	BNE TEST_Fail5
 	; SHA exists!
 	INC <currentSubTest
@@ -1580,7 +1580,7 @@ TEST_UnofficialInstructions_Continue:
 	JSR TEST_UnofficialInstructions_Prep
 	TSX
 	STX $501
-	LDA #$0D
+	LDA #$55
 	LDX #$FF
 	LDY #$80
 	.byte $9B ; SHS $0500
@@ -1601,7 +1601,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	LDX $501
 	TXS ; Fix the stack pointer.
 	LDA $0500
-	CMP #$0D ; See if this was the right value too.
+	CMP #$15 ; See if this was the right value too.
 	BNE TEST_Fail5
 	; SHS exists!
 	INC <currentSubTest
@@ -1613,7 +1613,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	STA <$50
 	LDA #$1E
 	STA <$51 ; ($51) = $1E80
-	LDA #$0D
+	LDA #$55
 	LDX #$FF
 	LDY #$80
 	.byte $93, $50 ; SHA ($50) -> $1E80
@@ -1626,7 +1626,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	; H is the high byte of the target address +1.
 	; So we should write $05 to $0500
 	LDA $0500
-	CMP #$0D
+	CMP #$15
 	BNE TEST_Fail5
 	; SHA ($zp), Y exists!
 	INC <currentSubTest
