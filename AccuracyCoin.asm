@@ -2695,7 +2695,7 @@ TEST_SHA_93:
 	LDA #$55
 	LDX #$AA
 	LDY #$10
-	.byte $93, Test_UnOp_IndirectPointerLo
+	.byte $93, Test_UnOp_IndirectPointerLo ; SHA (Test_UnOp_IndirectPointerLo), Y ; (Test_UnOp_IndirectPointerLo) = $1EF0
 	; Behavior 1: Hi = ($1E+1) & $55 & $AA = 0	:: write ($1E+1) & $55 & $AA = 0
 	; Behavior 2: Hi = ($1E+1) & $AA = 0A		:: ($1E+1) & $55 & ($AA | MAGIC) = ?? & $1F (we don't know what MAGIC is, but the result must be $1F or less)
 	LDA $0A00
@@ -2704,7 +2704,7 @@ TEST_SHA_93:
 	LDA <$00
 	CMP #$00
 	BEQ TEST_SHA_Behavior1_93_JMP ; if address $0000 was updated, this is behavior 1.
-	LDA #$02 ; And if address $1F00 was changed, or of nothing happened at all, this failed.
+	LDA #$3E ; (Error code F) And if address $1F00 was changed, or of nothing happened at all, this failed.
 	RTS		 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
 	
 TEST_SHA_Behavior2_93_JMP:
@@ -2722,7 +2722,7 @@ TEST_SHA_9F:
 	LDA #$55
 	LDX #$AA
 	LDY #$10
-	.byte $9F, $F0, $1E
+	.byte $9F, $F0, $1E	; SHA $1EF0, Y
 	; Behavior 1: Hi = ($1E+1) & $55 & $AA = 0	:: write ($1E+1) & $55 & $AA = 0
 	; Behavior 2: Hi = ($1E+1) & $AA = 0A		:: ($1E+1) & $55 & ($AA | MAGIC) = ?? & $1F (we don't know what MAGIC is, but the result must be $1F or less)
 	LDA $0A00
@@ -2731,7 +2731,7 @@ TEST_SHA_9F:
 	LDA <$00
 	CMP #$00
 	BEQ TEST_SHA_Behavior1_9F_JMP ; if address $0000 was updated, this is behavior 1.
-	LDA #$02 ; And if address $1F00 was changed, or of nothing happened at all, this failed.
+	LDA #$3E ; (Error code F) And if address $1F00 was changed, or of nothing happened at all, this failed.
 	RTS 	 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
 	
 TEST_SHA_Behavior2_9F_JMP:
@@ -2935,7 +2935,7 @@ TEST_SHS_9B:
 	LDA #$55
 	LDX #$AA
 	LDY #$10
-	.byte $9B, $F0, $1E
+	.byte $9B, $F0, $1E	; SHS $1EF0, Y
 	; Behavior 1: Hi = ($1E+1) & $55 & $AA = 0	:: write ($1E+1) & $55 & $AA = 0
 	; Behavior 2: Hi = ($1E+1) & $AA = 0A		:: ($1E+1) & $55 & ($AA | MAGIC) = ?? & $1F (we don't know what MAGIC is, but the result must be $1F or less)
 	LDX <Copy_SP
@@ -2946,7 +2946,7 @@ TEST_SHS_9B:
 	LDA <$00
 	CMP #$00
 	BEQ TEST_SHS_Behavior1_9B ; if address $0000 was updated, this is behavior 1.
-	LDA #$02 ; And if address $1F00 was changed, or of nothing happened at all, this failed.
+	LDA #$3E ; (Error code F) And if address $1F00 was changed, or of nothing happened at all, this failed.
 	RTS		 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
 	
 TEST_SHS_Behavior2_9B_JMP:
@@ -3252,15 +3252,6 @@ TEST_LAE_BB:
 	LDA #1
 	RTS
 ;;;;;;;
-
-
-
-
-
-
-
-
-
 
 TEST_ANC_0B:
 	LDA #$0B
@@ -4706,7 +4697,7 @@ RunTest:
 	JSR HighlightTest             ; and highlight it, since the cursor is still here.
 	LDA #1
 	STA <currentSubTest           ; set this to 1 before running any tests.
-	LDA <initialSubTest			  ; Some tests have multiple sets of tests to run, all using the same code. So writing here changes the test value.
+	STA <initialSubTest			  ; Some tests have multiple sets of tests to run, all using the same code. So writing here changes the test value.
 	LDA #$80
 	STA <Test_UnOp_SP			  ; Some tests might modify the stack pointer. The test will use a value of $80 just to be sure it's not overwriting other stack data.
 	JSR ResetScroll		          ; Reset the scroll before the test, since we just modified 'v' inside the previous subroutines.
