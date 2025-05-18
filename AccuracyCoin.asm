@@ -193,6 +193,8 @@ result_DMA_Plus_2007W = $44F
 
 result_VBlank_Beginning = $450
 result_VBlank_End = $451
+result_NMI_Control = $452
+result_NMI_Timing = $453
 
 
 
@@ -528,6 +530,8 @@ Suite_PPUBehavior:
 	.byte "PPU Timing", $FF
 	table "VBlank beginning", $FF, result_VBlank_Beginning, TEST_VBlank_Beginning
 	table "VBlank end", $FF, result_VBlank_End, TEST_VBlank_End
+	table "NMI Control", $FF, result_NMI_Control, TEST_NMI_Control
+	table "NMI Timing", $FF, result_NMI_Timing, TEST_NMI_Timing
 
 	.byte $FF
 	
@@ -699,6 +703,7 @@ TEST_OpenBus_PrepIRQLoop:
 	; We made it back safely
 	; if a BRK occured, or if we rolled into $8000, we failed.
 	; however, if we incorrectly executed address $6000 for the RTS, we can check for this by Loading $56
+	; Old Mesen behavior would potentially cause a crash, as the order of the JSR was incorrect, leaving the low byte of the return address on the bus, and $6000 was random bytes.
 	LDA <$56
 	CMP #$60
 	BNE TEST_Fail
@@ -1510,7 +1515,7 @@ TEST_UnofficialInstructionsExist:
 	JSR TEST_UnofficialInstructions_Prep
 	; Test the unstable part too, why not.
 	LDA #$0D
-	LDX #$15
+	LDX #$FF
 	LDY #$80
 	.byte $9F ; SHA $0500
 	.word $1E80 ; Use a mirror
@@ -1523,7 +1528,7 @@ TEST_UnofficialInstructionsExist:
 	; H is the high byte of the target address +1.
 	; So we should write $05 to $0500
 	LDA $0500
-	CMP #$05
+	CMP #$0D
 	BNE TEST_Fail5
 	; SHA exists!
 	INC <currentSubTest
@@ -1576,7 +1581,7 @@ TEST_UnofficialInstructions_Continue:
 	TSX
 	STX $501
 	LDA #$0D
-	LDX #$15
+	LDX #$FF
 	LDY #$80
 	.byte $9B ; SHS $0500
 	.word $1E80 ; Use a mirror
@@ -1596,7 +1601,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	LDX $501
 	TXS ; Fix the stack pointer.
 	LDA $0500
-	CMP #$05 ; See if this was the right value too.
+	CMP #$0D ; See if this was the right value too.
 	BNE TEST_Fail5
 	; SHS exists!
 	INC <currentSubTest
@@ -1609,7 +1614,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	LDA #$1E
 	STA <$51 ; ($51) = $1E80
 	LDA #$0D
-	LDX #$15
+	LDX #$FF
 	LDY #$80
 	.byte $93, $50 ; SHA ($50) -> $1E80
 	; This goes unstable, so the high byte of the target address will be changed.
@@ -1621,7 +1626,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	; H is the high byte of the target address +1.
 	; So we should write $05 to $0500
 	LDA $0500
-	CMP #$05
+	CMP #$0D
 	BNE TEST_Fail5
 	; SHA ($zp), Y exists!
 	INC <currentSubTest
@@ -3661,7 +3666,7 @@ TEST_VBlank_Beginning_Loop:
 	BNE TEST_VBlank_Beginning_Loop
 	; Address $50 should now look exactly like TEST_VBlank_Beginning_Expected_Results
 	LDX #0
-TEST_VBlank_Beginning_Loop2L:
+TEST_VBlank_Beginning_Loop2:
 	LDA <$50,X
 	CMP TEST_VBlank_Beginning_Expected_Results,X
 	BNE TEST_Fail9
@@ -3671,7 +3676,7 @@ TEST_VBlank_Beginning_Loop2L:
 	INX	
 TEST_VBlank_Beginning_Loop2_SkipByte2:
 	CPX #$07
-	BNE TEST_VBlank_Beginning_Loop2L
+	BNE TEST_VBlank_Beginning_Loop2
 	
 	;; END OF TEST ;;
 	LDA #1
@@ -3695,7 +3700,7 @@ TEST_VBlank_End_Loop:
 	TXA
 	JSR VblSync_Plus_A
 	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
-	; Vblank ends is about 2273.333 CPU cycles.
+	; Vblank ends in about 2273.333 CPU cycles.
 	; So let's stall for 2273-4 cycles, as this upcoming LDA takes 4 cycles.
 	JSR Clockslide_2269
 	LDA $2002
@@ -3713,13 +3718,13 @@ TEST_VBlank_End_Loop:
 	BNE TEST_VBlank_End_Loop ; loop until X=7
 	; Address $50 should now look exactly like TEST_VBlank_Beginning_Expected_Results
 	LDX #0
-TEST_VBlank_End_Loop2L:
+TEST_VBlank_End_Loop2:
 	LDA <$50,X
 	CMP TEST_VBlank_End_Expected_Results,X
 	BNE TEST_Fail9
 	INX
 	CPX #$07
-	BNE TEST_VBlank_End_Loop2L
+	BNE TEST_VBlank_End_Loop2
 	
 	;; END OF TEST ;;
 	LDA #1
@@ -3728,8 +3733,182 @@ TEST_VBlank_End_Loop2L:
 
 TEST_VBlank_End_Expected_Results:
 	.byte $01, $01, $01, $01, $00, $00, $00, $00
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+FAIL_NMI_Control1:
+	JSR DisableNMI
+	JMP TEST_Fail
 
+TEST_NMI_Control:
+	; Special thanks to blargg. I'm pretty much just doing what they did here.
+	LDA #$E8	; INX opcode
+	STA $700
+	LDA #$40	; RTI opcode
+	STA $701
+	;;; Test 1 [NMI Control]: The NMI should not occur when disabled. ;;;
+	; The NMI *should* already be disabled (and it being enabled during the "WaitForVBlank" that happened before the jump here would be problematic...)
+	; but let's test this anyway.
+	LDX #0
+	JSR Clockslide_29780 ; Wait 1 frame.
+	CPX #0
+	BNE FAIL_NMI_Control1 ; If the NMI occurs, it will run INX, ... RTI. That would increment X to 1, thus failing the test.
+	INC <currentSubTest
+	
+	;;; Test 2 [NMI Control]: The NMI should occur at vblank when enabled. ;;;
+	; Again, reaching this test would be impossible without the NMI occuring, so I have a hunch it won't fail this one.
+	JSR Clockslide_2269 ; wait long enough that VBlank should be over.
+	JSR EnableNMI
+	; X is still zero.
+	JSR Clockslide_29780 ; Wait 1 frame.
+	CPX #1
+	BNE FAIL_NMI_Control1 ; If the NMI occurs, it will run INX, ... RTI. That would increment X to 1, thus passing the test.
+	INC <currentSubTest
+
+	;;; Test 3 [NMI Control]: The NMI should occur when enabled during vblank, if the Vblank flag is enabled. ;;;
+	JSR DisableNMI
+	LDX #0
+	JSR WaitForVBlank
+	JSR Clockslide_29780 ; Wait 1 frame.
+	JSR EnableNMI
+	CPX #1
+	BNE FAIL_NMI_Control1
+	INC <currentSubTest
+	
+	;;; Test 4 [NMI Control]: The NMI should NOT occur when enabled during vblank, if the Vblank flag is disabled. ;;;
+	JSR DisableNMI
+	LDX #0
+	JSR WaitForVBlank ; Wait for Vblank reads $2002, clearing the Vblank flag
+	JSR EnableNMI
+	JSR Clockslide_2269 ; wait long enough that VBlank should be over.
+	CPX #0
+	BNE FAIL_NMI_Control1
+	INC <currentSubTest
+
+	;;; Test 5 [NMI Control]: The NMI should NOT occur a second time if writing $80 to $2000 when the NMI flag is already enabled. ;;;
+	JSR DisableNMI
+	LDX #0
+	JSR WaitForVBlank
+	JSR Clockslide_29780 ; Wait 1 frame.
+	JSR EnableNMI
+	JSR EnableNMI	
+	CPX #1
+	BNE FAIL_NMI_Control2	; If X was 2, then the NMI ran twice, thus failing the test.
+	INC <currentSubTest
+	
+	;;; Test 6 [NMI Control]: (previous test) but the NMI was enabled going into VBlank. ;;;
+	; The NMI is enabled going into this test.
+	LDX #0
+	JSR Clockslide_29780 ; Wait 1 frame. (The NMI should happen in here)
+	JSR EnableNMI ; (and the NMI should not happen a second time)
+	CPX #1
+	BNE FAIL_NMI_Control2	; If X was 2, then the NMI ran twice, thus failing the test.
+	INC <currentSubTest
+	
+	;;; Test 7 [NMI Control]: The NMI should occur an additional time if you disable and then re-enable the NMI. ;;;
+	JSR DisableNMI
+	LDX #0
+	JSR WaitForVBlank
+	JSR Clockslide_29780 ; Wait 1 frame.
+	JSR EnableNMI
+	JSR DisableNMI
+	JSR EnableNMI ; (and the NMI should happen a second time)
+	CPX #2
+	BNE FAIL_NMI_Control2
+	INC <currentSubTest
+	
+	;;; Test 8 [NMI Control]: The NMI should occur 2 instructions after the NMI is enabled. ;;;
+	; STA $2000
+	; LDX #$10
+	; [NMI]	
+	JSR DisableNMI
+	LDX #0
+	JSR WaitForVBlank
+	JSR Clockslide_29780 ; Wait 1 frame.
+	; Instead of using JSR EnableNMI, I need to actually write it all out here.
+	LDA <PPUCTRL_COPY
+	ORA #$80
+	STA <PPUCTRL_COPY
+	STA $2000
+	LDX #$10
+	CPX #$11
+	BNE FAIL_NMI_Control2	; If the NMI happened before the LDA #$10 (incorrect), then X will be 1, thus failing the test.
+	;; END OF TEST ;;
+	JSR DisableNMI
+	LDA #1
+	RTS
+;;;;;;;
+FAIL_NMI_Control2:
+FAIL_NMI_Timing:
+	JSR DisableNMI
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+
+TEST_NMI_Timing:
+	LDA #$84	; STY <$zp opcode
+	STA $700
+	LDA #Copy_Y
+	STA $701
+	LDA #$40	; RTI opcode
+	STA $702
+	; The NMI routien is now:
+	; STY <Copy_Y
+	; RTI	
+	JSR DisableRendering
+	LDX #0
+TEST_NMI_Timing_Loop:
+	TXA
+	LDY #$80
+	STA <Copy_Y
+	LDY #1
+	JSR VblSync_Plus_A
+	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
+	JSR Clockslide_29700 ; stall until 80 CPU cycles until Vblank
+	; Here's how this test works.
+	JSR EnableNMI ; This takes 30 cycles.
+	JSR Clockslide_49; NMI should be in 1 cycle.	
+	INY
+	INY
+	INY
+	INY
+	LDY <Copy_Y
+	STY <$50,X
+	TYA
+	JSR DisableNMI
+	INX	
+	CPX #$0A
+	BNE TEST_NMI_Timing_Loop ; loop until X=7
+	; Address $50 should now look exactly like TEST_VBlank_Beginning_Expected_Results
+	LDX #0
+	; Check the first value to determine if the CPU/PPU Clock alignment affected the results.
+	LDA <$50
+	CMP #$03
+	BEQ TEST_NMI_Timing_Loop3 ; Use this loop if the first value read was 3.
+	; Assume if it wasn't 3, that it was 2.
+TEST_NMI_Timing_Loop2:
+	LDA <$50,X
+	CMP TEST_NMI_Timing_Expected_Results+1,X ; The expected results shifter over by 1 ppu cycle.
+	BNE FAIL_NMI_Timing
+	INX
+	CPX #$0A
+	BNE TEST_NMI_Timing_Loop2
+	BEQ TEST_NMI_Timing_End	
+TEST_NMI_Timing_Loop3:
+	LDA <$50,X
+	CMP TEST_NMI_Timing_Expected_Results,X  ; The expected result shifter over by 1 ppu cycle.
+	BNE FAIL_NMI_Timing
+	INX
+	CPX #$0A
+	BNE TEST_NMI_Timing_Loop3
+TEST_NMI_Timing_End:
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+TEST_NMI_Timing_Expected_Results:
+	; With a single CPU/PPU clock alingment, this will be off by 1, starting at the $02 instead of the $03.
+	.byte $03,$02,$02,$02,$02,$02,$02,$01,$01,$01,$01
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	
 	.bank 3
