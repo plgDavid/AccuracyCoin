@@ -191,6 +191,10 @@ result_FFFF_Plus_X_Wraparound = $44D
 result_PPUOpenBus = $044E
 result_DMA_Plus_2007W = $44F
 
+result_VBlank_Beginning = $450
+result_VBlank_End = $451
+
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -318,7 +322,7 @@ PostResetFlagTest:
 	JSR LoadSuiteMenu
 
 	JSR ResetScroll
-	JSR EnableRendering
+	JSR EnableRendering_BG
 	JSR EnableNMI
 		
 InfiniteLoop:
@@ -521,11 +525,18 @@ Suite_PowerOnState:
 	
 	;; PPU Stuff ;;
 Suite_PPUBehavior:
-	.byte "PPU Behavior", $FF
-	table "$2002 Race condition", $FF, result_Unimplemented, DebugTest
-	table "Palette Corruption", $FF, result_Unimplemented, DebugTest
+	.byte "PPU Timing", $FF
+	table "VBlank beginning", $FF, result_VBlank_Beginning, TEST_VBlank_Beginning
+	table "VBlank end", $FF, result_VBlank_End, TEST_VBlank_End
+
 	.byte $FF
 	
+	
+	;; PPU Misc ;;
+Suite_PPUMisc:
+	.byte "PPU Misc.", $FF
+	table "Palette Corruption", $FF, result_Unimplemented, DebugTest
+	.byte $FF
 	
 	.bank 1
 	.org $A000
@@ -3531,7 +3542,7 @@ TEST_DMA_Plus_2007R:
 	;; END OF TEST ;;
 	
 	JSR ResetScrollAndWaitForVBlank
-	JSR EnableRendering	
+	JSR EnableRendering_BG	
 	LDA #1
 	RTS
 ;;;;;;;
@@ -3557,14 +3568,14 @@ TEST_DMA_Plus_2007W:
 	;; END OF TEST ;;
 	
 	JSR ResetScrollAndWaitForVBlank
-	JSR EnableRendering	
+	JSR EnableRendering_BG	
 	LDA #1
 	RTS
 
 TEST_Fail7:
 	JSR ResetScrollAndWaitForVBlank
 TEST_Fail8:
-	JSR EnableRendering	
+	JSR EnableRendering_BG	
 	JMP TEST_Fail
 
 Test_FFFF_Plus_X_Wraparound:
@@ -3612,6 +3623,109 @@ Test_FFFF_Plus_X_Wraparound:
 	LDA #1
 	RTS
 ;;;;;;;
+
+TEST_VBlank_Beginning:
+	;;; Test 1 [VBLank Beginning]: Tests the timing of the $2002 Vblank flag ;;;
+	; Special thanks to blargg for figuring this stuff out.
+	JSR DisableRendering
+	LDX #0
+TEST_VBlank_Beginning_Loop:
+	TXA
+	PHA	
+	JSR VblSync_Plus_A
+	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
+	; Let's "subtract" 5 CPU cycles.
+	JSR Clockslide_29776
+	LDX $2002
+	LDY $2002
+	; Put the X register into bit 1, and the Y register into bit 2.
+	TXA
+	ASL A
+	LDA #0
+	ROL A
+	STA <$00
+	TYA
+	ASL A
+	LDA #0
+	ROL A
+	ASL A
+	ORA <$00
+	; A should now be 0000 00XY, where X and Y are bit 7 of X and Y.
+	STA <$00
+	PLA
+	TAX
+	LDA <$00
+	STA <$50,X
+	INX
+	CPX #$07
+	BNE TEST_VBlank_Beginning_Loop
+	; Address $50 should now look exactly like TEST_VBlank_Beginning_Expected_Results
+	LDX #0
+TEST_VBlank_Beginning_Loop2L:
+	LDA <$50,X
+	CMP TEST_VBlank_Beginning_Expected_Results,X
+	BNE TEST_Fail9
+	INX
+	CPX #$03 ; since byte 2 in this list could depend on CPU/PPU clock alignment...
+	BNE TEST_VBlank_Beginning_Loop2_SkipByte2	; let's ignore it.
+	INX	
+TEST_VBlank_Beginning_Loop2_SkipByte2:
+	CPX #$07
+	BNE TEST_VBlank_Beginning_Loop2L
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+	
+TEST_Fail9:
+	JSR EnableRendering_BG	
+	JMP TEST_Fail
+
+TEST_VBlank_Beginning_Expected_Results:
+	;				     $00 is also acceptable in the fourth byte (byte 3), depending on CPU/PPU clock alignment.
+	.byte $02, $02, $02, $02, $00, $01, $01
+
+TEST_VBlank_End:
+	;;; Test 1 [VBLank Beginning]: Tests the timing of the $2002 Vblank flag ;;;
+	; Special thanks to blargg for figuring this stuff out.
+	JSR DisableRendering
+	LDX #0
+TEST_VBlank_End_Loop:
+	TXA
+	JSR VblSync_Plus_A
+	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
+	; Vblank ends is about 2273.333 CPU cycles.
+	; So let's stall for 2273-4 cycles, as this upcoming LDA takes 4 cycles.
+	JSR Clockslide_2269
+	LDA $2002
+	ASL A
+	LDA #0
+	ROL A	
+	STA <$50,X
+	INX
+	CPX #$07
+	BNE TEST_VBlank_End_Loop
+	; Address $50 should now look exactly like TEST_VBlank_Beginning_Expected_Results
+	LDX #0
+TEST_VBlank_End_Loop2L:
+	LDA <$50,X
+	CMP TEST_VBlank_End_Expected_Results,X
+	BNE TEST_Fail9
+	INX
+	CPX #$07
+	BNE TEST_VBlank_End_Loop2L
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+TEST_VBlank_End_Expected_Results:
+	.byte $01, $01, $01, $01, $00, $00, $00, $00
+
+
+
 	
 	.bank 3
 	.org $F000
@@ -3620,6 +3734,26 @@ EnableRendering:
 	PHA
 	LDA <PPUMASK_COPY
 	ORA #$18
+	STA <PPUMASK_COPY
+	STA $2001
+	PLA
+	RTS
+;;;;;;;
+
+EnableRendering_BG:
+	PHA
+	LDA <PPUMASK_COPY
+	ORA #$08
+	STA <PPUMASK_COPY
+	STA $2001
+	PLA
+	RTS
+;;;;;;;
+
+EnableRendering_S:
+	PHA
+	LDA <PPUMASK_COPY
+	ORA #$10
 	STA <PPUMASK_COPY
 	STA $2001
 	PLA
@@ -3730,8 +3864,15 @@ ClearPage5: ; Page 5 is reserved for RAM used by tests. It's a good idea to clea
 ClearPage5Loop:
 	STA $500,X
 	STA $600,X ; it also clears page 6.
+	STA $700,X ; it also clears page 7.
 	INX
 	BNE ClearPage5Loop
+	; let's also clear $50 - $5F on the zero page.
+ClearPage5ZPLoop:
+	STA <$50,X
+	INX
+	CPX #$10
+	BNE ClearPage5ZPLoop
 	RTS
 ;;;;;;;
 
@@ -4459,7 +4600,7 @@ DrawNewSuiteTable:
 	JSR LoadSuiteMenu
 	; wait for vblank.
 	JSR WaitForVBlank	
-	JSR EnableRendering
+	JSR EnableRendering_BG
 	JSR EnableNMI
 	RTS
 ;;;;;;;
@@ -4568,7 +4709,7 @@ RunTest:
 	JSR HighlightTest		      ; and also highlight it, as the cursor is still there.
 	JSR SetUpNMIRoutineForMainMenu; Recreate the NMI routine JMP, since some tests need their own NMI routine.
 	JSR EnableNMI			      ; With the test over, re-enable the NMI
-	JSR EnableRendering		      ; and enable rendering too. This should still occur during Vblank.
+	JSR EnableRendering_BG	      ; and enable rendering too. This should still occur during Vblank.
 	LDY <$FE				      ; Restore the Y register
 	LDX <$FD				      ; Restore the X register
 	RTS
@@ -4679,6 +4820,26 @@ Clockslide_3000:       ;=6
 ;;;;;;;
 
 ;A frame has about 29780 cycles, so let's make a few around that number.
+Clockslide_29700:		;=6
+	JSR Clockslide_38 	;=44
+	JSR Clockslide_50	;=94
+	JSR Clockslide_100	;=194
+	JSR Clockslide_500	;=694
+	JSR Clockslide_500	;=1194
+	JSR Clockslide_500	;=1694
+	JSR Clockslide_500	;=2194
+	JSR Clockslide_500	;=2694
+	JSR Clockslide_3000	;=5694
+	JSR Clockslide_3000	;=8694
+	JSR Clockslide_3000	;=11694
+	JSR Clockslide_3000	;=14694
+	JSR Clockslide_3000	;=17694
+	JSR Clockslide_3000	;=20694
+	JSR Clockslide_3000	;=23694
+	JSR Clockslide_3000	;=26694
+	JSR Clockslide_3000	;=29694
+	RTS					;=29750
+;;;;;;;
 Clockslide_29750:		;=6
 	JSR Clockslide_38 	;=44
 	JSR Clockslide_100	;=144
@@ -4704,6 +4865,23 @@ Clockslide_29780:		;=6
 	JSR Clockslide_29750;=29774
 	RTS					;=29780
 ;;;;;;;
+Clockslide_29776:		;=6
+	JSR Clockslide_14	;=20
+	JSR Clockslide_29750;=29770
+	RTS					;=29776
+;;;;;;;
+Clockslide_2269:		;=6
+	JSR Clockslide_500	;=506
+	JSR Clockslide_500	;=1006
+	JSR Clockslide_500	;=1506
+	JSR Clockslide_500	;=2006
+	JSR Clockslide_100	;=2106
+	JSR Clockslide_100	;=2206
+	JSR Clockslide_40	;=2246
+	JSR Clockslide_17	;=2263
+	RTS					;=2269
+
+
 Clockslide36_Plus_A:;+6
 	STA <$00	; +3
 	LDX #$FF	; +2
@@ -4715,6 +4893,14 @@ Clockslide36_Plus_A:;+6
 	JMP [$0000]	; 5 + A + 6
 ;;;;;;;;;;;;;;;;;
 
+VblSync_Plus_A_End: ; Moved here for space.
+	JSR Clockslide_29780
+	JSR Clockslide_29750
+	NOP
+	NOP
+	NOP
+	BIT $2002
+	RTS
 
 	
 	.org $FE87
@@ -4788,6 +4974,7 @@ sync_dmc_loop2:
 	RTS				  ; 412 -> 406
 	; the next DMA is at (432) cycles, so we have 406 cycles to go.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 	.org $FF00
 Clockslide:
 	; JSR takes 6 cycles.
@@ -4877,7 +5064,7 @@ Clockslide_12:
 	.byte $60
 ;;;;;;;;;;;;;
 
-DMASync:
+DMASync: ; Line up the CPU and the DMA. The DMA occurs 406 CPU cycles after the RTS. (typically, this leads into a few clockslides, and another RTS)
 	LDA <result_DMADMASync_PreTest ; Check if we need to run the "does the DMA update the data bus" test.
 	BEQ TEST_DoesTheDMAUpdateOpenBus ; if we haven't ran this yet, run this test, then return back here.
 	CMP #01
@@ -4943,12 +5130,57 @@ TEST_DoesTheDMA_Fail:
 	JMP DMASync
 ;;;;;;;;;;;;;;;	
 	
+VblSync: ; 
+	PHA
+	SEI
+	LDA #0
+	STA $2000	
+
+	BIT $2002
+VblSync_Loop1:    
+	BIT $2002
+	BPL VblSync_Loop1
+	
+	JSR Clockslide_29750
+	JSR Clockslide_21	
+
+	BIT $2002
+	BMI VblSync_skip4
+	LDA $0000	;+4 cycles
+VblSync_skip4:
+    JSR Clockslide_21
+	JMP VblSync_Loop2 ;+3 cycles
+;;;;;;;;;;;;;;;;;;;;;
+
 	.org $FFC0
 	; 17 00s. This will be the DPCM "audio sample" played during the loop. It should just be silence.
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 
-	.bank 3
-	.org $FFF5
+VblSync_Loop2:
+	JSR Clockslide_16
+	BIT $2002
+	BIT $2002
+	BPL VblSync_Loop2
+	
+	PLA
+	RTS
+;;;;;;;
+
+VblSync_Plus_A: ; In this context, A is a PPU cycle.
+	JSR VblSync	; Sync to VBlank
+VblSync_Plus_A_Loop:   
+	JSR Clockslide_29750 ; wait 29774 cycles
+	JSR Clockslide_24
+	CLC						; + 2
+	ADC #$FF 				; + 2
+	BCS VblSync_Plus_A_Loop ; + 3 if looping, 2 otherwise. (29781 CPU cycles if looping. Each frame is 29780.67 CPU cycles long, so this advances 1 PPU cycle)
+	JMP VblSync_Plus_A_End	; I ran out of space, so I moved it up there.
+	
+	.byte $EA, $EA, $EA, $EA, $EA, $EA, $EA
+
+
+
+	;.org $FFF5
 TEST_FFFF_Branch_Wraparound:
 	; This is part of test 3 of Test_FFFF_Plus_X_Wraparound
 	; A = 0, so this branch to $0050 is always taken.
