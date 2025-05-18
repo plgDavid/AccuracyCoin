@@ -3638,6 +3638,15 @@ TEST_VBlank_Beginning_Loop:
 	JSR Clockslide_29776
 	LDX $2002
 	LDY $2002
+	; Here's how this test works.
+	; When A=0, the LDX instruction is too early, and the LDY instruction happens after VBlank begins.
+	;	- In that case, X=$00, but Y=$80 (The bits get rearranged, and this is stored at $50 as "02")
+	; Every iteration of this loop, this test will run 1 PPU cycle closer to VBlank than the previous iteration.
+	; When A=4, the LDX instruction will read $2002 on the same cycle that would otherwise set the VBlank flag.
+	;	- in that case, the value read is $00, and the VBlank flag is NOT set afterwards.	X=$00, Y=$00
+	; When A>=5, the read cycle of the LDX instruction will be after Vblank begins. X=$80, (the vblank flag is cleard, so...) Y=$00.
+	;	-(The bits get rearranged, and this is stored at $50 as "01")
+	
 	; Put the X register into bit 1, and the Y register into bit 2.
 	TXA
 	ASL A
@@ -3699,13 +3708,18 @@ TEST_VBlank_End_Loop:
 	; So let's stall for 2273-4 cycles, as this upcoming LDA takes 4 cycles.
 	JSR Clockslide_2269
 	LDA $2002
-	ASL A
-	LDA #0
-	ROL A	
-	STA <$50,X
-	INX
+	; Here's how this test works.
+	; When A=0, the LDA instruction occurs before VBlank ends.
+	; Every iteration of this loop, this test will run 1 PPU cycle closer to the end of VBlank than the previous iteration.
+	; Eventually, the vblank flag is no longer set when the LDA instruction reads from $2002. (when A>=4)
+	; The bits are rearranged so the VBlank flag gets stored in bit 0, and this value is written to $50,X
+	ASL A	; Shift VBlank flag into carry
+	LDA #0	; clear A
+	ROL A	; Rotate carry into bit 0.
+	STA <$50,X	; store in $50,X
+	INX	
 	CPX #$07
-	BNE TEST_VBlank_End_Loop
+	BNE TEST_VBlank_End_Loop ; loop until X=7
 	; Address $50 should now look exactly like TEST_VBlank_Beginning_Expected_Results
 	LDX #0
 TEST_VBlank_End_Loop2L:
@@ -5185,7 +5199,7 @@ TEST_FFFF_Branch_Wraparound:
 	; This is part of test 3 of Test_FFFF_Plus_X_Wraparound
 	; A = 0, so this branch to $0050 is always taken.
 	LDA #0
-	.byte $F0, $57; BNE $0050
+	.byte $F0, $56; BNE $0050
 	; Address $0050 is a branch to this RTS.
 	RTS
 ;;;;;;;
