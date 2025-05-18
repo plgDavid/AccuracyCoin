@@ -5190,7 +5190,7 @@ VblSync_Plus_A_Loop:
 	BCS VblSync_Plus_A_Loop ; + 3 if looping, 2 otherwise. (29781 CPU cycles if looping. Each frame is 29780.67 CPU cycles long, so this advances 1 PPU cycle)
 	JMP VblSync_Plus_A_End	; I ran out of space, so I moved it up there.
 	
-	.byte $EA, $EA, $EA, $EA, $EA, $EA, $EA
+	.byte $EA, $EA, $EA, $EA, $EA, $EA
 
 
 
@@ -5199,7 +5199,7 @@ TEST_FFFF_Branch_Wraparound:
 	; This is part of test 3 of Test_FFFF_Plus_X_Wraparound
 	; A = 0, so this branch to $0050 is always taken.
 	LDA #0
-	.byte $F0, $56; BNE $0050
+	.byte $F0, $57; BNE $0050
 	; Address $0050 is a branch to this RTS.
 	RTS
 ;;;;;;;
