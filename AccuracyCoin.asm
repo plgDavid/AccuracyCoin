@@ -692,6 +692,35 @@ TEST_OpenBus:
 	AND #$E0
 	CMP #$40 ; Bit 6 when reading a controller is pretty much always going to be set due to open bus.
 	BNE TEST_Fail
+	LDA $4017
+	AND #$E0
+	CMP #$40 ; Bit 6 when reading a controller is pretty much always going to be set due to open bus.
+	BNE TEST_Fail
+	LDA #$F0
+	STA $2002
+	LDX #$17
+	LDA $3FFF, X ; dummy read $2006
+	AND #$E0
+	CMP #$E0 ; However, in this case, the open bus bits are all set.
+	BNE TEST_Fail
+	INX
+	JSR WaitForVBlank
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintCHR
+	.word $2400
+	.byte $F0, $FF
+	JSR PrintCHR
+	.word $2400
+	.byte $FF	
+	LDA $2007 ; empty PPU buffer
+	LDA $3FFF, X ; dummy read $2007
+	PHA
+	JSR ResetScroll
+	PLA
+	AND #$E0
+	CMP #$E0 ; However, in this case, the open bus bits are all set.
+	BNE TEST_Fail
 	INC <currentSubTest
 	
 	;;; Test 5 [Open Bus]: The databus actually exists, and the open bus behavior isn't being faked. ;;;
@@ -725,7 +754,7 @@ TEST_OpenBus_PrepIRQLoop:
 	; Old Mesen behavior would potentially cause a crash, as the order of the JSR was incorrect, leaving the low byte of the return address on the bus, and $6000 was random bytes.
 	LDA <$56
 	CMP #$60
-	BNE TEST_Fail
+	BNE TEST_Fail2
 	INC <currentSubTest 
 	
 	;;; Test 6 [Open Bus]: Dummy Reads update databus, test by reading $4015 ;;;
