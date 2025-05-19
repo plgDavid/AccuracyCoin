@@ -195,7 +195,7 @@ result_VBlank_Beginning = $450
 result_VBlank_End = $451
 result_NMI_Control = $452
 result_NMI_Timing = $453
-
+result_NMI_Suppression = $454
 
 
 result_PowOn_CPURAM = $0480
@@ -532,6 +532,7 @@ Suite_PPUBehavior:
 	table "VBlank end", $FF, result_VBlank_End, TEST_VBlank_End
 	table "NMI Control", $FF, result_NMI_Control, TEST_NMI_Control
 	table "NMI Timing", $FF, result_NMI_Timing, TEST_NMI_Timing
+	table "NMI Suppression", $FF, result_NMI_Suppression, TEST_NMI_Suppression
 
 	.byte $FF
 	
@@ -3866,6 +3867,8 @@ TEST_NMI_Timing_Loop:
 	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
 	JSR Clockslide_29700 ; stall until 80 CPU cycles until Vblank
 	; Here's how this test works.
+	; The NMI stores the value of Y somewhere.
+	; Here's a series of INY isntructions. The NMI will happen in the middle of these.
 	JSR EnableNMI ; This takes 30 cycles.
 	JSR Clockslide_49; NMI should be in 1 cycle.	
 	INY
@@ -3910,6 +3913,60 @@ TEST_NMI_Timing_Expected_Results:
 	; With a single CPU/PPU clock alingment, this will be off by 1, starting at the $02 instead of the $03.
 	.byte $03,$02,$02,$02,$02,$02,$02,$01,$01,$01,$01
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+TEST_NMI_Suppression:
+	LDA #$C8	; INY opcode
+	STA $700
+	LDA #$40	; RTI opcode
+	STA $701
+	JSR DisableRendering
+	LDX #0
+TEST_NMI_Suppression_Loop:
+	TXA
+	LDY #0
+	JSR VblSync_Plus_A
+	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
+	JSR Clockslide_29700 ; stall until 80 CPU cycles until Vblank
+	JSR EnableNMI ; This takes 30 cycles.
+	JSR Clockslide_45; NMI should be in 1 cycle.	
+	LDA $2002
+	ASL A ; Put VBlank flag in Carry
+	TYA	; transfer Y to A (Y = 1 if the NMI happened)
+	ROL A
+	; A = (0000 00YV) where Y is set if the NMI occured, and V is set if the VBlank flag is set.) 
+	STA <$50,X
+	JSR DisableNMI
+	INX	
+	CPX #$0A
+	BNE TEST_NMI_Suppression_Loop ; loop until X=7
+	LDX #1
+TEST_NMI_Suppression_Loop2:
+	LDA <$50,X
+	CMP TEST_NMI_Suppression_Expected_Results,X  ; The expected result shifter over by 1 ppu cycle.
+	BNE FAIL_NMI_Suppression
+	INX
+	CPX #3
+	BNE TEST_NMI_Suppression_Skip
+	INX
+TEST_NMI_Suppression_Skip:
+	CPX #6
+	BNE TEST_NMI_Suppression_Skip2
+	INX
+TEST_NMI_Suppression_Skip2:
+	CPX #$0A
+	BNE TEST_NMI_Suppression_Loop2
+TEST_NMI_Suppression_End:
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+TEST_NMI_Suppression_Expected_Results:
+	; With a single CPU/PPU clock alingment, this will be off by 1, starting at the $02 instead of the $03.
+		;skip reading the FF bytes. it could be 00 or 02. The final FF could be 01/03.
+	.byte $FF, $02, $02, $FF, $00, $01, $FF, $03, $03, $03, $03
+FAIL_NMI_Suppression:
+	JSR DisableNMI
+	JMP TEST_Fail
 
 	
 	.bank 3
