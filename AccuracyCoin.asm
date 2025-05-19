@@ -1514,7 +1514,7 @@ TEST_UnofficialInstructionsExist:
 	;;; Test D [Unofficial Instructions Exist]: Does SHA exist? ;;;
 	JSR TEST_UnofficialInstructions_Prep
 	; Test the unstable part too, why not.
-	LDA #$55
+	LDA #$1F
 	LDX #$FF
 	LDY #$80
 	.byte $9F ; SHA $0500
@@ -1527,8 +1527,8 @@ TEST_UnofficialInstructionsExist:
 	;	   = 5
 	; H is the high byte of the target address +1.
 	; So we should write $05 to $0500
-	LDA $0500
-	CMP #$15
+	LDA $0700
+	CMP #$1F
 	BNE TEST_Fail5
 	; SHA exists!
 	INC <currentSubTest
@@ -1580,7 +1580,7 @@ TEST_UnofficialInstructions_Continue:
 	JSR TEST_UnofficialInstructions_Prep
 	TSX
 	STX $501
-	LDA #$55
+	LDA #$1F
 	LDX #$FF
 	LDY #$80
 	.byte $9B ; SHS $0500
@@ -1600,8 +1600,8 @@ TEST_UnofficialInstructions_Continue:
 TEST_UnofficialInstructions_SHS_Continue:
 	LDX $501
 	TXS ; Fix the stack pointer.
-	LDA $0500
-	CMP #$15 ; See if this was the right value too.
+	LDA $0700
+	CMP #$1F ; See if this was the right value too.
 	BNE TEST_Fail5
 	; SHS exists!
 	INC <currentSubTest
@@ -1613,7 +1613,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	STA <$50
 	LDA #$1E
 	STA <$51 ; ($51) = $1E80
-	LDA #$55
+	LDA #$1F
 	LDX #$FF
 	LDY #$80
 	.byte $93, $50 ; SHA ($50) -> $1E80
@@ -1625,8 +1625,8 @@ TEST_UnofficialInstructions_SHS_Continue:
 	;	   = 5
 	; H is the high byte of the target address +1.
 	; So we should write $05 to $0500
-	LDA $0500
-	CMP #$15
+	LDA $0700
+	CMP #$1F
 	BNE TEST_Fail5
 	; SHA ($zp), Y exists!
 	INC <currentSubTest
@@ -3850,11 +3850,13 @@ TEST_NMI_Timing:
 	STA $701
 	LDA #$40	; RTI opcode
 	STA $702
-	; The NMI routien is now:
+	; The NMI routine is now:
 	; STY <Copy_Y
 	; RTI	
 	JSR DisableRendering
 	LDX #0
+	;;; Test 1 [NMI Timing]: Tests the timing of the NMI ;;;
+
 TEST_NMI_Timing_Loop:
 	TXA
 	LDY #$80
@@ -3872,7 +3874,6 @@ TEST_NMI_Timing_Loop:
 	INY
 	LDY <Copy_Y
 	STY <$50,X
-	TYA
 	JSR DisableNMI
 	INX	
 	CPX #$0A
