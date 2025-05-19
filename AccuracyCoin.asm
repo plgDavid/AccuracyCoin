@@ -199,6 +199,9 @@ result_NMI_Suppression = $454
 result_NMI_VBL_End = $455
 result_NMI_Disabled_VBL_Start = $456
 
+result_Sprite0Hit_Behavior = $457
+
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -283,6 +286,8 @@ VblLoop:
 	;; End of test ;;
 PostResetFlagTest:
 	
+	JSR DisableRendering
+	
 	; With those values copied for future reference, let's overwrite the nametable.
 	JSR SetUpDefaultPalette
 	JSR ClearNametable
@@ -290,6 +295,8 @@ PostResetFlagTest:
 	LDA #02
 	STA $4014 ; Set up OAM
 	
+	LDA #0
+	STA <dontSetPointer
 	; set up the NMI routine.
 	JSR SetUpNMIRoutineForMainMenu
 	
@@ -355,6 +362,7 @@ TableTable:
 	.word Suite_DMATests
 	.word Suite_PowerOnState
 	.word Suite_PPUBehavior
+	.word Suite_SpriteZeroHits
 EndTableTable:
 
 
@@ -527,9 +535,9 @@ Suite_PowerOnState:
 	table "PPU Reset Flag", $FF, result_PowOn_PPUReset, TEST_PowerOnState_PPU_ResetFlag
 	.byte $FF
 	
-	;; PPU Stuff ;;
+	;; PPU VBL Timing ;;
 Suite_PPUBehavior:
-	.byte "PPU Timing", $FF
+	.byte "PPU VBlank Timing", $FF
 	table "VBlank beginning", $FF, result_VBlank_Beginning, TEST_VBlank_Beginning
 	table "VBlank end", $FF, result_VBlank_End, TEST_VBlank_End
 	table "NMI Control", $FF, result_NMI_Control, TEST_NMI_Control
@@ -537,7 +545,12 @@ Suite_PPUBehavior:
 	table "NMI Suppression", $FF, result_NMI_Suppression, TEST_NMI_Suppression
 	table "NMI at VBlank end", $FF, result_NMI_VBL_End, TEST_NMI_VBL_End
 	table "NMI disabled at VBlank", $FF, result_NMI_Disabled_VBL_Start, TEST_NMI_Disabled_VBL_Start
-
+	.byte $FF
+	
+	;; Sprite Zero Hits ;;
+Suite_SpriteZeroHits:
+	.byte "Sprite Zero Hits", $FF
+	table "Sprite 0 Hit behavior", $FF, result_Sprite0Hit_Behavior, TEST_Sprite0Hit_Behavior
 
 	.byte $FF
 	
@@ -4010,6 +4023,7 @@ TEST_NMI_VBL_End_Expected_Results:
 
 TEST_NMI_Disabled_VBL_Start:
 	JSR PrepNMI_TimingTests
+	;;; Test 1 [NMI Disabled at VBLank]: Tests the timing of the NMI if disabled right as VBlank occurs ;;;
 TEST_NMI_Disabled_VBL_Start_Loop:
 	TXA
 	LDY #0
@@ -4049,6 +4063,170 @@ TEST_NMI_Disabled_VBL_Skip:
 TEST_NMI_Disabled_VBL_Start_Expected_Results:
 						; This $FF could be a 00, or a 01, so skip it in the evaluation.
 	.byte $00, $00, $00, $FF, $01, $01, $01
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+FAIL_Sprite0Hit_Behavior1:
+	JMP FAIL_Sprite0Hit_Behavior
+
+TEST_Sprite0Hit_Behavior:
+	; Some prep.
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintCHR
+	.word $2001 ; At address $2001
+	.byte $FC, $FF
+	JSR ResetScroll
+	JSR ClearPage2 ; $200 to $2FF = $FF
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte $00, $FC, $00, $08
+	; InitializeSpriteZero updates the return address, returning here:
+	JSR WaitForVBlank
+	
+	;;; Test 1 [Sprite Zero Hit Behavior]: Does a sprite zero hit occur in a situation in which it should? ;;;
+	; What is a sprite zero hit?
+	; Every slot in Object Attribute Memory (OAM) can be numbered from 0 to 63.
+	; The object in slot zero will be referred to as "Sprite Zero".
+	; The "CHR" byte in OAM determines which index from the pattern table to use for the graphics.
+	; Each pixel drawn will take 2 bits from the pattern data, and if the value is 00, it will be rendered with "the background color".
+	; If the 2 bits are 01, 10, or 11, then this pixel will be drawn with color 1, 2, and 3 of the specified color palette respectively. (with color 0 being the background color)
+	; Let's refer to any pixel that is using a non-background-color as a "solid pixel".
+	; Keep in mind, this "solid pixel" terminology is only referring to the 2 bits from the pattern data, and has nothing to do with the actual colors drawn.
+	; A "sprite zero hit" occurs when the following happens:
+	; A solid pixel of sprite zero is drawn on the same pixel as a solid pixel of the background.
+	; And if a sprite zero hit was detected, bit 6 of address $2002 is set, similar to how the VBlank flag is using bit 7 of the same address.
+	
+	; So let's work this one out.
+	; A solid white square has been placed at VRAM address $2001. (We reset the scroll with the value $2000, so this square is 8 pixels to the right of the upper left of the screen)
+	; We have initialized Sprite Zero as a white square, and set it's screen coordinates to ($08, $00) which should overlap the box. (But it will be 1 pixel lower)
+	; Therefore, a solid pixel of Sprtie Zero is guaranteed to overlap a solid pixel of this white square in the background.
+	
+	JSR EnableRendering_S ; start rendering sprites!
+	LDX #02
+	STX $4014 ; OAM DMA
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and the sprite zero hit to occur. (we're not going for precise timing on this test. Just to see if it happens.)
+	LDA $2002	; Bit 6 should be set, since the sprite zero hit should have occured.
+	AND #$40
+	BEQ FAIL_Sprite0Hit_Behavior1
+	INC <currentSubTest
+
+	;;; Test 2 [Sprite Zero Hit Behavior]: Sprite zero hits should not happen if Background Rendering is disabled. ;;;
+	JSR DisableRendering_BG ; only disable rendering the background.
+	JSR WaitForVBlank
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for the background is not rendering.)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior1
+	INC <currentSubTest
+
+	;;; Test 3 [Sprite Zero Hit Behavior]: Sprite zero hits should not happen if Sprite Rendering is disabled. ;;;
+	JSR WaitForVBlank
+	JSR EnableRendering_BG ; enable the background
+	JSR DisableRendering_S ; and disable sprites
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for sprites are not rendering.)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior1
+	INC <currentSubTest
+
+	;;; Test 4 [Sprite Zero Hit Behavior]: Sprite zero hits should not happen if both sprites and background Rendering are disabled. ;;;
+	JSR WaitForVBlank
+	JSR DisableRendering_BG ; enable the background
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for rendering is disabled.)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior1
+	INC <currentSubTest
+	
+	;;; Test 5 [Sprite Zero Hit Behavior]: Sprite zero hits should not happen if sprite zero is completely transparent. ;;;
+	JSR WaitForVBlank
+	JSR EnableRendering  ; enable the background and sprites.
+	JSR InitializeSpriteZero ; Init sprite zero with a completely transparent sprite. (All pixels are background-color)
+	;    Ypos, CHR, Att, XPos
+	.byte $00, $FF, $00, $08
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for sprite zero as no solid pixels.)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest	
+	
+	;;; Test 6 [Sprite Zero Hit Behavior]: Sprite zero hits can happen at X=254. (verify for the next test) ;;;
+	JSR WaitForVBlank	
+	JSR PrintCHR
+	.word $201F ; At address $201F
+	.byte $FC, $FF
+	JSR ResetScroll
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte $00, $FC, $00, $FE
+	JSR WaitForVBlank
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should occur.)
+	LDA $2002	; Bit 6 should be set, since the sprite zero hit should have occured.
+	AND #$40
+	BEQ FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest
+	
+	;;; Test 7 [Sprite Zero Hit Behavior]: Sprite zero hits cannot happen at X=255. ;;;
+	JSR WaitForVBlank	
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte $00, $FC, $00, $FF
+	JSR WaitForVBlank
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for sprite zero is at X=255.)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest
+
+	;;; Test 8 [Sprite Zero Hit Behavior]: Sprite zero hits should not happen if sprite zero is at X=0, and the PPU's 8 pixel mask is enabled (show BG, no sprite). ;;;
+	JSR WaitForVBlank
+	JSR PrintCHR
+	.word $2000 ; At address $2000
+	.byte $FC, $FF
+	JSR ResetScroll
+	JSR EnableRendering  ; enable the background and sprites.
+	LDA #$1A
+	STA $2001 ; enable the background in the left 8 pixels, but not sprites
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte $00, $FC, $00, $00
+	JSR WaitForVBlank
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for sprite zero is masked away.)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest	
+	BNE TEST_Sprite0Hit_Behavior_Continued ; branch always around this fail condition.
+	
+FAIL_Sprite0Hit_Behavior:
+	JSR WaitForVBlank
+	JSR DisableRendering_S
+	JSR EnableRendering_BG
+	JMP TEST_Fail
+	
+TEST_Sprite0Hit_Behavior_Continued:
+	;;; Test 9 [Sprite Zero Hit Behavior]: Sprite zero hits should not happen if sprite zero is at X=0, and the PPU's 8 pixel mask is enabled (show sprite, no BG). ;;;
+	JSR WaitForVBlank
+	LDA #$1C
+	STA $2001 ; enable the sprites in the left 8 pixels, but not BG
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for sprite zero is masked away.)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
 
 	
 	.bank 3
@@ -4088,6 +4266,26 @@ DisableRendering:
 	PHA
 	LDA <PPUMASK_COPY
 	AND #$E7
+	STA <PPUMASK_COPY
+	STA $2001
+	PLA
+	RTS
+;;;;;;;
+
+DisableRendering_S:
+	PHA
+	LDA <PPUMASK_COPY
+	AND #$EF
+	STA <PPUMASK_COPY
+	STA $2001
+	PLA
+	RTS
+;;;;;;;
+
+DisableRendering_BG:
+	PHA
+	LDA <PPUMASK_COPY
+	AND #$F7
 	STA <PPUMASK_COPY
 	STA $2001
 	PLA
@@ -4197,6 +4395,16 @@ ClearPage5ZPLoop:
 	INX
 	CPX #$10
 	BNE ClearPage5ZPLoop
+	RTS
+;;;;;;;
+
+ClearPage2: ; Page 2 is reserved for OAM. Let's clear it with FFs.
+	LDA #$FF
+	LDX #0
+ClearPage2Loop:
+	STA $200,X
+	INX
+	BNE ClearPage2Loop
 	RTS
 ;;;;;;;
 
@@ -4367,6 +4575,59 @@ P32SkipADDR:
 	LDX <Copy_X
 	LDY <Copy_Y
 	LDA <Copy_A
+	RTS
+;;;;;;;
+
+PrintCHR:	; Pretty much the same thing as "PrintText" but don't convert from ascii.
+	STA <Copy_A
+	STY <Copy_Y
+	STX <Copy_X
+	LDA <dontSetPointer
+	BNE PChr_dontSetPointer
+	JSR CopyReturnAddressToByte0
+	LDY #1
+	LDA $2002
+	LDA [$0000],Y ; Read from the pointer
+	STA <$03
+	DEY
+	LDA [$0000],Y
+	STA <$04
+	LDA #02
+	JSR AddAToByte0
+PChr_dontSetPointer:
+	LDA <$03
+	STA $2006
+	LDA <$04
+	STA $2006
+PChrloop:
+	LDA [$0000],Y
+	CMP #$FF
+	BEQ PChrpostLoop
+	STA $2007
+	INY
+	BNE PChrloop ; Branch always to the loop
+PChrpostLoop:	
+	INY
+	LDA <dontSetPointer
+	BNE PChrskipFixRTS
+	JSR FixRTS
+	LDY <Copy_Y
+PChrskipFixRTS:
+	LDX <Copy_X
+	LDA <Copy_A
+	RTS
+;;;;;;;
+
+InitializeSpriteZero:
+	JSR CopyReturnAddressToByte0
+	LDY #0
+InitializeSpriteZeroLoop:
+	LDA [$0000],Y
+	STA $200,Y
+	INY
+	CPY #4
+	BNE InitializeSpriteZeroLoop
+	JSR FixRTS
 	RTS
 ;;;;;;;
 
