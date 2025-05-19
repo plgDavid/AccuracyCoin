@@ -196,6 +196,7 @@ result_VBlank_End = $451
 result_NMI_Control = $452
 result_NMI_Timing = $453
 result_NMI_Suppression = $454
+result_NMI_VBL_End = $455
 
 
 result_PowOn_CPURAM = $0480
@@ -533,6 +534,7 @@ Suite_PPUBehavior:
 	table "NMI Control", $FF, result_NMI_Control, TEST_NMI_Control
 	table "NMI Timing", $FF, result_NMI_Timing, TEST_NMI_Timing
 	table "NMI Suppression", $FF, result_NMI_Suppression, TEST_NMI_Suppression
+	table "NMI at VBlank end", $FF, result_NMI_VBL_End, TEST_NMI_VBL_End
 
 	.byte $FF
 	
@@ -3967,6 +3969,55 @@ TEST_NMI_Suppression_Expected_Results:
 FAIL_NMI_Suppression:
 	JSR DisableNMI
 	JMP TEST_Fail
+	
+TEST_NMI_VBL_End:
+	LDA #$C8	; INY opcode
+	STA $700
+	LDA #$40	; RTI opcode
+	STA $701
+	JSR DisableRendering
+	LDX #0
+	;;; Test 1 [NMI at VBlank End]: Tests the timing of the NMI as VBlank ends ;;;
+	; Special thanks to blargg for figuring this stuff out.
+	JSR DisableRendering
+	LDX #0
+TEST_NMI_VBL_End_Loop:
+	TXA
+	LDY #0
+	JSR VblSync_Plus_A
+	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
+	; Vblank ends in about 2273.333 CPU cycles.
+	; So let's stall for 2200 cycles.
+	JSR Clockslide_2252
+	JSR EnableNMI	; NMI enable in 22 cycles.
+	TYA
+	STA <$50,X	; store in $50,X	
+	JSR DisableNMI
+	INX	
+	CPX #$07
+	BNE TEST_NMI_VBL_End_Loop ; loop until X=7
+	; Address $50 should now look exactly like TEST_VBlank_Beginning_Expected_Results
+	LDX #0
+TEST_NMI_VBL_End_Loop2:
+	LDA <$50,X
+	CMP TEST_NMI_VBL_End_Expected_Results,X
+	BNE FAIL_NMI_Suppression
+	INX
+	CPX #$07
+	BNE TEST_NMI_VBL_End_Loop2
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+TEST_NMI_VBL_End_Expected_Results:
+	.byte $01, $01, $01, $00, $00, $00, $00, $00
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	
+	
+	
 
 	
 	.bank 3
@@ -5122,6 +5173,18 @@ Clockslide_2269:		;=6
 	JSR Clockslide_40	;=2246
 	JSR Clockslide_17	;=2263
 	RTS					;=2269
+;;;;;;;
+
+Clockslide_2252:		;=6
+	JSR Clockslide_500	;=506
+	JSR Clockslide_500	;=1006
+	JSR Clockslide_500	;=1506
+	JSR Clockslide_500	;=2006
+	JSR Clockslide_100	;=2106
+	JSR Clockslide_100	;=2206
+	JSR Clockslide_40	;=2246
+	RTS					;=2252
+;;;;;;;
 
 
 Clockslide36_Plus_A:;+6
