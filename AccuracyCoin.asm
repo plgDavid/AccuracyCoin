@@ -197,6 +197,7 @@ result_NMI_Control = $452
 result_NMI_Timing = $453
 result_NMI_Suppression = $454
 result_NMI_VBL_End = $455
+result_NMI_Disabled_VBL_Start = $456
 
 
 result_PowOn_CPURAM = $0480
@@ -535,6 +536,8 @@ Suite_PPUBehavior:
 	table "NMI Timing", $FF, result_NMI_Timing, TEST_NMI_Timing
 	table "NMI Suppression", $FF, result_NMI_Suppression, TEST_NMI_Suppression
 	table "NMI at VBlank end", $FF, result_NMI_VBL_End, TEST_NMI_VBL_End
+	table "NMI disabled at VBlank", $FF, result_NMI_Disabled_VBL_Start, TEST_NMI_Disabled_VBL_Start
+
 
 	.byte $FF
 	
@@ -3917,12 +3920,7 @@ TEST_NMI_Timing_Expected_Results:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 TEST_NMI_Suppression:
-	LDA #$C8	; INY opcode
-	STA $700
-	LDA #$40	; RTI opcode
-	STA $701
-	JSR DisableRendering
-	LDX #0
+	JSR PrepNMI_TimingTests
 TEST_NMI_Suppression_Loop:
 	TXA
 	LDY #0
@@ -3967,20 +3965,15 @@ TEST_NMI_Suppression_Expected_Results:
 		;skip reading the FF bytes. it could be 00 or 02. The final FF could be 01/03.
 	.byte $FF, $02, $02, $FF, $00, $01, $FF, $03, $03, $03, $03
 FAIL_NMI_Suppression:
+FAIL_NMI_VBL_End:
 	JSR DisableNMI
 	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
 	
 TEST_NMI_VBL_End:
-	LDA #$C8	; INY opcode
-	STA $700
-	LDA #$40	; RTI opcode
-	STA $701
-	JSR DisableRendering
-	LDX #0
+	JSR PrepNMI_TimingTests
 	;;; Test 1 [NMI at VBlank End]: Tests the timing of the NMI as VBlank ends ;;;
 	; Special thanks to blargg for figuring this stuff out.
-	JSR DisableRendering
-	LDX #0
 TEST_NMI_VBL_End_Loop:
 	TXA
 	LDY #0
@@ -4001,7 +3994,7 @@ TEST_NMI_VBL_End_Loop:
 TEST_NMI_VBL_End_Loop2:
 	LDA <$50,X
 	CMP TEST_NMI_VBL_End_Expected_Results,X
-	BNE FAIL_NMI_Suppression
+	BNE FAIL_NMI_VBL_End
 	INX
 	CPX #$07
 	BNE TEST_NMI_VBL_End_Loop2
@@ -4012,12 +4005,50 @@ TEST_NMI_VBL_End_Loop2:
 ;;;;;;;
 
 TEST_NMI_VBL_End_Expected_Results:
-	.byte $01, $01, $01, $00, $00, $00, $00, $00
+	.byte $01, $01, $01, $00, $00, $00, $00
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+TEST_NMI_Disabled_VBL_Start:
+	JSR PrepNMI_TimingTests
+TEST_NMI_Disabled_VBL_Start_Loop:
+	TXA
+	LDY #0
+	JSR VblSync_Plus_A
+	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
+	JSR Clockslide_29700 ; NMI in ~80 cycles
+	JSR EnableNMI ; this takes 30 cycles
+	JSR Clockslide_29	
+	JSR DisableNMI	; NMI disabled in 22 cycles.
+	TYA
+	STA <$50,X	; store in $50,X	
+	INX	
+	CPX #$07
+	BNE TEST_NMI_Disabled_VBL_Start_Loop ; loop until X=7
+	; Address $50 should now look exactly like TEST_NMI_Disabled_VBL_Start_Expected_Results
+	LDX #0
+TEST_NMI_Disabled_VBL_Start_L2:
+	LDA <$50,X
+	CMP TEST_NMI_Disabled_VBL_Start_Expected_Results,X
+	BNE FAIL_NMI_Disabled_VBL_Start
+	INX
+	CPX #3
+	BNE TEST_NMI_Disabled_VBL_Skip
+	INX
+TEST_NMI_Disabled_VBL_Skip:
+	CPX #$07
+	BNE TEST_NMI_Disabled_VBL_Start_L2
 	
-	
-	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+	FAIL_NMI_Disabled_VBL_Start:
+	JSR DisableNMI
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+TEST_NMI_Disabled_VBL_Start_Expected_Results:
+						; This $FF could be a 00, or a 01, so skip it in the evaluation.
+	.byte $00, $00, $00, $FF, $01, $01, $01
 
 	
 	.bank 3
@@ -4761,6 +4792,16 @@ DoubleLDA2007:	; There are a few tests that need to read the contents of a PPU a
 	RTS
 ;;;;;;;
 
+PrepNMI_TimingTests:
+	LDA #$C8	; INY opcode
+	STA $700
+	LDA #$40	; RTI opcode
+	STA $701
+	JSR DisableRendering
+	LDX #0
+	RTS
+;;;;;;;
+
 
 VRegisterByXIndexLowLUT:
 	.byte $E1, $21, $61, $A1
@@ -5206,6 +5247,7 @@ VblSync_Plus_A_End: ; Moved here for space.
 	NOP
 	BIT $2002
 	RTS
+;;;;;;;
 
 	
 	.org $FE87
