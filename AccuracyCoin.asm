@@ -200,6 +200,7 @@ result_NMI_VBL_End = $455
 result_NMI_Disabled_VBL_Start = $456
 
 result_Sprite0Hit_Behavior = $457
+result_ArbitrarySpriteZero = $458
 
 
 
@@ -222,9 +223,9 @@ result_PowOn_PPUReset = $0484
 	.org $8000
 	; The open bus test needs to make sure an inaccurate emulation of open bus will fall into test code, so this function here is a fail condition of the open bus test.
 OpenBusTestFakedOpenBusBehavior:
-	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-	; I put 17 $00's here for playing silent DPCM samples.
-	; The 00's double as BRK instructions, which fail the open bus test.
+	NOP	; An incorrect implementation of open bus might execute all the way to here from address $5000.
+	NOP	; The two NOPS are for alignment, and this BRK takes the PC to some "test failed" handler.
+	BRK	;
 	
 CannotWriteToROM_01:
 	.byte $01; This value is used in the "Cannot write to ROM" test.
@@ -308,7 +309,12 @@ PostResetFlagTest:
 	LDA #0
 	STA $100 ; initialize the placeholder test results.
 	
+	STA $6000 ; An incorrect open bus implementation might end up executing address $6000, so let's initialzie these 3 bytes to BRKs.
+	STA $6001 ; Though I would prefer if this was a NES 2.0 cartridge without any PRG RAM, so writing here might do nothing anyway.
+	STA $6002 ; There's still a good chance an emulator doesn't support NES 2.0 and just puts PRG RAM here anyway.
+	
 	JSR DMASync ; Initialize result_DMADMASync_PreTest
+	
 	
 	LDA #$FF
 	STA <menuCursorYPos
@@ -551,6 +557,7 @@ Suite_PPUBehavior:
 Suite_SpriteZeroHits:
 	.byte "Sprite Zero Hits", $FF
 	table "Sprite 0 Hit behavior", $FF, result_Sprite0Hit_Behavior, TEST_Sprite0Hit_Behavior
+	table "Arbitrary Sprite zero", $FF, result_ArbitrarySpriteZero, TEST_ArbitrarySpriteZero
 
 	.byte $FF
 	
@@ -4094,11 +4101,7 @@ TEST_NMI_Disabled_VBL_Start_Expected_Results:
 	.byte $00, $00, $00, $FF, $01, $01, $01
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-FAIL_Sprite0Hit_Behavior1:
-	JMP FAIL_Sprite0Hit_Behavior
-
-TEST_Sprite0Hit_Behavior:
-	; Some prep.
+PREP_SpriteZeroHit:
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintCHR
@@ -4111,6 +4114,14 @@ TEST_Sprite0Hit_Behavior:
 	.byte $00, $FC, $00, $08
 	; InitializeSpriteZero updates the return address, returning here:
 	JSR WaitForVBlank
+	RTS
+;;;;;;;
+FAIL_Sprite0Hit_Behavior1:
+	JMP FAIL_Sprite0Hit_Behavior
+
+TEST_Sprite0Hit_Behavior:
+	; Some prep.
+	JSR PREP_SpriteZeroHit
 	
 	;;; Test 1 [Sprite Zero Hit Behavior]: Does a sprite zero hit occur in a situation in which it should? ;;;
 	; What is a sprite zero hit?
@@ -4174,7 +4185,7 @@ TEST_Sprite0Hit_Behavior:
 	JSR WaitForVBlank
 	JSR EnableRendering  ; enable the background and sprites.
 	JSR InitializeSpriteZero ; Init sprite zero with a completely transparent sprite. (All pixels are background-color)
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte $00, $FF, $00, $08
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
 	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should not occur, for sprite zero as no solid pixels.)
@@ -4190,7 +4201,7 @@ TEST_Sprite0Hit_Behavior:
 	.byte $FC, $FF
 	JSR ResetScroll
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte $00, $FC, $00, $FE
 	JSR WaitForVBlank
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
@@ -4203,7 +4214,7 @@ TEST_Sprite0Hit_Behavior:
 	;;; Test 7 [Sprite Zero Hit Behavior]: Sprite zero hits cannot happen at X=255. ;;;
 	JSR WaitForVBlank	
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte $00, $FC, $00, $FF
 	JSR WaitForVBlank
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
@@ -4223,7 +4234,7 @@ TEST_Sprite0Hit_Behavior:
 	LDA #$1A
 	STA $2001 ; enable the background in the left 8 pixels, but not sprites
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte $00, $FC, $00, $00
 	JSR WaitForVBlank
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
@@ -4255,7 +4266,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	;;; Test A [Sprite Zero Hit Behavior]: Despite the 8 pixel mask, if the sprite has visible pixels beyond the mask (X>0, X<8) the Sprite Zero Hit occurs. ;;;
 	JSR WaitForVBlank
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte $00, $FC, $00, $01	; Xpos = 1
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
 	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should occur, for some sprite zero is visible.)
@@ -4271,7 +4282,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	.byte $FC, $FF	; solid white square.
 	JSR ResetScroll
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte 238, $FC, $00, $08
 	JSR WaitForVBlank
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
@@ -4284,7 +4295,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	;;; Test C [Sprite Zero Hit Behavior]: Sprite zero hits cannot happen at Y>=239. ;;;
 	JSR WaitForVBlank	
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte 239, $FC, $00, $08
 	JSR WaitForVBlank
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
@@ -4305,7 +4316,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	.byte $C1, $FF ; $C1 is a full 8x8 square with a single pixel missing around the middle of it.
 	JSR ResetScroll
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte $02, $C0, $00, $13	; CHR $C0 is a 1x1 pixel dot. Position ($13, $02) should be lined up perfectly so this one dot sprite falls in the 1x1 hole of the tile.
 	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
 	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should miss, since the visible pixel of the sprite isn't overlapping the tile's visible pixels)
@@ -4317,50 +4328,191 @@ TEST_Sprite0Hit_Behavior_Continued:
 	;;; Test E [Sprite Zero Hit Behavior]: The sprite zero hit flag is not set until the PPU cycle in which the dot in drawn. ;;;
 	JSR WaitForVBlank
 	JSR InitializeSpriteZero
-	;    Ypos, CHR, Att, XPos
+	;    YPos, CHR, Att, XPos
 	.byte $00, $FC, $00, $FE
 	JSR DisableRendering
 	LDA #0
 	JSR VblSync_Plus_A
 	; the sprite zero hit will occur at X=254 of scanline 1. (cycle 255 of scanline 1, since the screen isn't rendering until cycle 1)
-	; We are now synced with dot 0 of scanline 241. (Scanline 261 is the final one before looping back to scanline 0)
+	; We are now synced with dot 1 of scanline 241. (Scanline 261 is the final one before looping back to scanline 0)
 	; Every scanline is 341 PPU cycles.
 	; (21 scanlines plus scanline 0) * PPU cycles per line + cycles into line 1 before the sprite zero hit =
-	; (21+1)*341 + 255 ppu cycles until the sprite zero hit =
-	; 7757 ppu cycles until the sprite zero hit.
+	; (21+1)*341 + 253 ppu cycles until the sprite zero hit =
+	; 7756 ppu cycles until the sprite zero hit.
 	; There are 3 PPU cycles for every CPU cycle
-	; 2585.67 CPU cycles until the sprite zero hit.
-	STX $4014 ; OAM DMA ; 4 + 514 CPU cycles. 2067.67 CPU cycles left.
-	JSR EnableRendering ; +30 CPU cycles. 2037.67 CPU cycles left.
-	JSR Clockslide_2032 ; 5.67 CPU cycles left.
-	LDA $2002	; This should read 1.67 CPU cycles *BEFORE* the sprite zero hit flag is set.
+	; 2585.33 CPU cycles until the sprite zero hit.
+	STX $4014 ; OAM DMA ; 4 + 514 CPU cycles. 2067.33 CPU cycles left.
+	JSR EnableRendering ; +30 CPU cycles. 2037.33 CPU cycles left.
+	JSR Clockslide_2032 ; 5.33 CPU cycles left.
+	LDA $2002	; This should read 1 CPU cycles *BEFORE* the sprite zero hit flag is set.
 	AND #$40
 	BNE FAIL_Sprite0Hit_Behavior2
 	LDA #0
 	JSR VblSync_Plus_A
-	STX $4014 ; OAM DMA ; + 514 CPU cycles. 2071.67 CPU cycles left.
-	JSR EnableRendering ; +30 CPU cycles. 2041.67 CPU cycles left.
-	JSR Clockslide_2032 ; 5.67 CPU cycles left.
-	NOP ; 3.67 CPU cycles left.
-	NOP ; 1.67 CPU cycles left. (I chose to add an extra NOP here, in case CPU/PPU alignment affects the timing of this flag when reading $2002.)
-	LDA $2002	; This should read 2.33 CPU cycles *AFTER* the sprite zero hit flag is set.
+	STX $4014 ; OAM DMA ; + 514 CPU cycles. 2071.33 CPU cycles left.
+	JSR EnableRendering ; +30 CPU cycles. 2041.33 CPU cycles left.
+	JSR Clockslide_2032 ; 5.33 CPU cycles left.
+	NOP ; 3.33 CPU cycles left.
+	NOP ; 1.33 CPU cycles left. (I chose to add an extra NOP here, in case CPU/PPU alignment affects the timing of this flag when reading $2002.)
+	LDA $2002	; This should read 2 CPU cycles *AFTER* the sprite zero hit flag is set.
 	AND #$40
-	BEQ FAIL_Sprite0Hit_Behavior2
-	
-	INC <currentSubTest
-	
-	
-	
+	BEQ FAIL_Sprite0Hit_Behavior2	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
 ;;;;;;;
-
 FAIL_Sprite0Hit_Behavior2:
+	JMP FAIL_Sprite0Hit_Behavior
+;;;;;;;;;;;;;;;;;
+
+FAIL_ArbitrarySpriteZero1:
+	JMP FAIL_ArbitrarySpriteZero
+
+TEST_ArbitrarySpriteZero:
+	;;; Test 1 [Arbitrary Sprite Zero]: Sprite 0 should trigger sprite zero hit. No other sprite should. ;;;
+	JSR PREP_SpriteZeroHit
+	JSR EnableRendering_S ; start rendering sprites!
+	LDA #02
+	STA $4014 ; OAM DMA
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and the sprite zero hit to occur. (we're not going for precise timing on this test. Just to see if it happens.)
+	LDA $2002	; Bit 6 should be set, since the sprite zero hit should have occured.
+	AND #$40
+	BEQ FAIL_ArbitrarySpriteZero1
+	LDX #1
+TEST_ArbitrarySpriteZeroLoop:
+	JSR WaitForVBlank
+	JSR ClearPage2
+	JSR InitializeSpriteX
+	;    YPos, CHR, Att, XPos
+	.byte $00, $FC, $00, $08
+	LDA #02
+	STA $4014 ; OAM DMA
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and the sprite zero hit to occur. (we're not going for precise timing on this test. Just to see if it happens.)
+	LDA $2002	; Bit 6 should be set, since the sprite zero hit should have occured.
+	AND #$40
+	BNE FAIL_ArbitrarySpriteZero1
+	INX
+	CPX #64
+	BNE TEST_ArbitrarySpriteZeroLoop
+	INC <currentSubTest	
+	
+	;;; Test 2 [Arbitrary Sprite Zero]: The first processed sprite of a scanline is treated as "sprite zero". ;;;
+	; This test is a bit tricky to understand.
+	; PPU cycle >= 1 && PPU cycle <= 64: clear Secondary-OAM.
+	; PPU cycle >= 65 && PPU cycle <= 256: Sprite evaluation
+	; PPU cycle >= 257 && PPU cycle <= 320: Shift register initialization. (Every one of these cycles also clears PPUOAMAddress to 0.)
+	;
+	; Keep in mind, on scanline n, we're processing the OAM data in preparation for scanline n+1.
+	;
+	; Let's take a deep look into how Sprite Evaluation works on any given scanline.
+	; for odd ppu cycles: read index "PPUOAMAddress" of OAM. Let's call the value read "S"
+	;	- "PPUOAMAddress" is the value set by writing to $2003.
+	;	- for our example here, assume PPUOAMAddress is zero, reset during the shift register init from the previous scanline.
+	; for even cycles: Evaluate "S" and determine if this sprite should be drawn on the next scanline.
+	;	-Depending on how the evaluation goes, modify PPUOAMAddress. Typically increment by 1 or 4. (actually "it's complicated", but that's for a different test.)
+	; Let's focus on the even cycles.
+	; First of all, if Secondary-OAM is full, the behavior is different. Let's focus on when Secondary-OAM is not full.
+	; STEP 1: Check that the Y position of this object is in range of this scanline.
+	;	- The value checked here is "S", which was read in the previous PPU cycle. In this example, "S" should be index 0 of OAM, since PPUOAMAddress was cleared in the previous scanline.
+	;	- If the current scanline number-"S" is positive, and less than 8 (or 16 if the sprites are using the 8 by 16 mode) then this object is in range for this scanline.
+	;	- That previous sentance was just a verbose way of calculating "yes, this object should be rendered on the next scanline".
+	;	- Now, if Secondary-OAM is not full (in this example it is still empty, so yeah- it's not full) we know this object will be in the next scanline, so add it to Secondary-OAM.
+	;	- In addition to being added to Secondary-OAM, if this is PPU cycle 66 of a scanline, it is assumed that we are processing sprite zero, so raise a flag indicating sprite zero exists on the next scanline.
+	; STEP 2 to 4: Read "S" as the CHR data, attributes, and X position respectively. 
+	;	- There's actually some wild stuff going on with the X position, but that's for a different test.
+	;
+	; So to recap, read the Y position, and on the following cycle, see if it's in range. If it is, and this is PPU cycle 66 of a given scanline, raise a flag indicating sprite zero exists on the next scanline.
+	; - this "flag" essentially says, Secondary-OAM index 0 is "Sprite Zero", as in, a Sprite Zero hit will occur if a "solid pixel" of "sprite zero" overlaps a "solid pixel" of the background.
+	; - which is, again, a really verbose way of saying "run a check for a sprite zero hit next scanline" if the value of "S" on ppu cycle 66 was in range for this scanline. 
+	;
+	; Duh. If you've implemented sprite zero hits, you should be following along. 
+	; Perhaps that "flag" isn't the exact way your emulator checks if a sprite is "sprite zero", but it will make sense in a moment why I'm phrasing it this way.
+	;
+	; What happens if you write to $2003 after the "Shift register initialization" and before "Sprite evaluation"?
+	; Well, PPUOAMAddress won't be $00 when sprite evaluation begins.
+	; So the first sprite processed on cycle 66 won't necessarily be index zero of OAM.
+	; But if "S" is in range of the scanline, and it's cycle 66, then the next scanline will consider Secondary-OAM index 0 as "sprite zero", even if it isn't OAM index 0.
+	;
+	; In other words, it *is* possible for an object that isn't OAM index 0 to trigger a sprite 0 hit!
+
+	; Since this test is a doozy, I will comment every line and explain why I'm doing this.
+	JSR ClearPage2				; Let's clear page 2. I'm using page 2 for the OAM DMA, so OAM will be a copy of $200 - $2FF
+	JSR WaitForVBlank			; Wait for VBlank. I'm going to disable rendering next, and I'd prefer if I waited for VBlank to do that.
+	JSR DisableRendering		; Rendering is now disabled. Rendering needs to be disabled for this next subroutine to work properly.
+	LDA #0						; A=0, since this next subroutine syncs to PPU cycle A of Vblank, and I want to sync to cycle 0.
+	JSR VblSync_Plus_A  		; Sync the next CPU cycle to PPU cycle 0 of VBlank. (cycle 1 of scanline 241)
+								; The CPU is now at PPU cycle 0 of vblank.
+								; Let's caluclate how many CPU cycles remain until scanline 0 is being rendered.
+								; We're on dot 1 of scanline 241. The final dot before scanline 0 is dot 341 of scanline 261
+								; There are 341 PPU cycles per scanline
+								; (341 * 21)-1 = 7160 PPU cycles until dot 0 of scanline 0.
+								; 3 PPU cycles per 1 CPU cycle. 7160/3 = 2386.66 CPU cycles.
+								; So let's count CPU cycles. We have 2386 cycles until dot 0, which is when we want to write to $2003 to udpate PPUOAMAddress
+	LDX #32						; (+2 CPU cycles)   Let's initialize Sprite 32 at screen coordinates ($08, $00)
+	JSR InitializeSpriteX		; (+236 CPU cycles) This subroutine reads the following 4 bytes, and adjusts the return address accordingly, so the following 4 bytes are not executed.
+	.byte $00, $FC, $00, $08	; Y Position, Pattern Table Index, Attributes, X position  
+	LDA #02						; (+2 CPU cycles)   A = 2, so the OAM DMA will use page 2
+	STA $4014					; (+518 CPU cycles) Run the OAM DMA with page 2.
+	LDA #32*4					; (+2 CPU cycles) Load A with 32*4 (128, or $80) which is the OAM address for the object we initialized.
+	JSR EnableRendering			; (+30 CPU cycles) Enable rendering of both the background and sprites, so the sprite zeto hit can occur.
+								; After setting up sprite 32 and running the OAM DMA, we have 1596 CPU cycles remaining before cycle 0 of scanline 0.
+	JSR Clockslide_1596			; (+1596 CPU cycles) This function just stalls for 1596 CPU cycles, so we should be at cycle 0 of scnaline 0.
+	STA $2003					; Store A ($80) at PPUOAMAddress.
+								; Now, the sprite evaluation will occur with sprite 32 getting processed first.
+								; Since this object is the first one processed, PPU cycle 66 will check if it is in range of the current scanline.
+								; and if it is (it is), it will be treated as sprite zero for the purposes of triggering a sprite zero hit, despite being sprite 32.
+	JSR Clockslide_500			; Wait a few scanline for this entire sprite to be drawn
+	LDA $2002					; Read PPUSTATUS
+	AND #$40					; mask away every bit except the Sprite Zero Hit flag.
+	BEQ FAIL_ArbitrarySpriteZero; If bit 6 was zero, the sprite zero hit did not occur, thus failing the test.
+	INC <currentSubTest			; And if we passed this, increment the subtest so the error code is adjusted for this next test.
+	
+	;;; Test 3 [Arbitrary Sprite Zero]: Misaligned OAM can properly draw a sprite, and yes, it can even trigger a sprite zero hit. ;;;
+	; So in that previous test, PPUOAMAddress was a multiple of 4, which is how it should be.
+	; Now things are getting complicated, because we need to talk about what happens in sprite evaluation if PPUOAMAddress is NOT a multiple of 4.
+	;	- To be clear, there is also some very specific behavior with misaligned OAM (if the y position is NOT in range) that cannot be checked with sprite zero hits.
+	;	- That will be tested in a different test.
+	; Let's begin with a misaligned object that passes the "Y Position in range of scanline check"
+	; Let's write all of this at $0281.
+	; Keep in mind, the OAM attribute byte doesn't have bits 2, 3, or 4, and since we're misaligned, now our CHR Pattern is missing those bits.
+	; The CHR Pattern of our choice is essentially bitwise ANDed with $E3.
+	; That's why tile $E3 in the pattern data is just a full square.
+	JSR ClearPage2				; Same as above. Clear page 2.
+	JSR WaitForVBlank			; Same as above. Wait for VBlank.
+	JSR DisableRendering		; Same as above. Disable rendering for the VBL Sync subroutine.
+	LDA #0						; Same as above. Sync to ppu cycle 0 of vblank. 
+	JSR VblSync_Plus_A  		; Same as above. Sync to ppu cycle 0 of vblank. 
+								; Same as above. We have 2386 cycles until dot 0 of scanline 0.	
+	LDX #$81					; We're going to write this at OAM $81
+	JSR InitializeOAMAddrX		; (+235 CPU cycles) Similar to the other subroutine, but this one doesn't multiply X by 4.
+	.byte $00, $E3, $00, $08	; Same as above. These bytes don't get executed. Use pattern $E3.
+	LDA #02						; Same as above. A=2 for the OAM DMA.
+	STA $4014					; Same as above. Run the OAM DMA with page 2.
+	LDA #$81					; Load A with $81, which we will write to $2003 to offset the OAM address.
+	JSR EnableRendering			; Same as above. Enable rendering sprites + background.
+	JSR Clockslide_1596			; Same as above, except we're 1 CPU cycles earlier than last time. (3 PPU cycles)
+	STA $2003					; Store A ($81) at PPUOAMAddress.
+	JSR Clockslide_500			; Same as above. Wait a few scanline for this entire sprite to be drawn
+	LDA $2002					; Read PPUSTATUS
+	AND #$40					; Same as above. mask away every bit except the Sprite Zero Hit flag.
+	BEQ FAIL_ArbitrarySpriteZero; Same as above. If bit 6 was zero, the sprite zero hit did not occur, thus failing the test.
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+	
+FAIL_ArbitrarySpriteZero:
 	JSR WaitForVBlank
 	JSR DisableRendering_S
 	JSR EnableRendering_BG
 	JMP TEST_Fail
+
+
+
+
+
+
+
 	
 	.bank 3
 	.org $F000
@@ -4532,12 +4684,29 @@ ClearPage5ZPLoop:
 ;;;;;;;
 
 ClearPage2: ; Page 2 is reserved for OAM. Let's clear it with FFs.
+	STX <Copy_X
 	LDA #$FF
-	LDX #0
+	LDX #$F
 ClearPage2Loop:
 	STA $200,X
-	INX
-	BNE ClearPage2Loop
+	STA $210,X
+	STA $220,X
+	STA $230,X
+	STA $240,X
+	STA $250,X
+	STA $260,X
+	STA $270,X
+	STA $280,X
+	STA $290,X
+	STA $2A0,X
+	STA $2B0,X
+	STA $2C0,X
+	STA $2D0,X
+	STA $2E0,X
+	STA $2F0,X
+	DEX
+	BPL ClearPage2Loop
+	LDX <Copy_X
 	RTS
 ;;;;;;;
 
@@ -4763,6 +4932,34 @@ InitializeSpriteZeroLoop:
 	JSR FixRTS
 	RTS
 ;;;;;;;
+
+InitializeSpriteX:
+	JSR CopyReturnAddressToByte0
+	LDA #$02
+	STA <$03
+	TXA
+	ASL A
+	ASL A
+InitializeSpriteReUseThisForOAMAddrX:
+	STA <$02
+	LDY #0
+InitializeSpriteXLoop:
+	LDA [$0000],Y
+	STA [$0002],Y
+	INY
+	CPY #4
+	BNE InitializeSpriteXLoop
+	JSR FixRTS
+	RTS
+;;;;;;;
+
+InitializeOAMAddrX:
+	JSR CopyReturnAddressToByte0
+	LDA #$02
+	STA <$03
+	TXA
+	JMP InitializeSpriteReUseThisForOAMAddrX
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 Read32NametableBytes:
 	LDA #$20
@@ -5630,6 +5827,15 @@ Clockslide_2032:       ;=6
 	JSR Clockslide_500 ;=2014
 	JSR Clockslide_16  ;=2030
 	RTS			       ;=2036
+;;;;;;;
+
+Clockslide_1596:	   ;=6
+	JSR Clockslide_500 ;=506
+	JSR Clockslide_500 ;=1006
+	JSR Clockslide_500 ;=1506
+	JSR Clockslide_50  ;=1556
+	JSR Clockslide_34  ;=1590
+	RTS			       ;=1596
 ;;;;;;;
 
 Clockslide36_Plus_A:;+6
