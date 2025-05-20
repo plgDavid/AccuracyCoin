@@ -4448,19 +4448,19 @@ TEST_ArbitrarySpriteZeroLoop:
 								; (341 * 21)-1 = 7160 PPU cycles until dot 0 of scanline 0.
 								; 3 PPU cycles per 1 CPU cycle. 7160/3 = 2386.66 CPU cycles.
 								; So let's count CPU cycles. We have 2386 cycles until dot 0, which is when we want to write to $2003 to udpate PPUOAMAddress
-	LDX #32						; (+2 CPU cycles)   Let's initialize Sprite 32 at screen coordinates ($08, $00)
+	LDX #8						; (+2 CPU cycles)   Let's initialize Sprite 8 at screen coordinates ($08, $00)
 	JSR InitializeSpriteX		; (+236 CPU cycles) This subroutine reads the following 4 bytes, and adjusts the return address accordingly, so the following 4 bytes are not executed.
 	.byte $00, $FC, $00, $08	; Y Position, Pattern Table Index, Attributes, X position  
 	LDA #02						; (+2 CPU cycles)   A = 2, so the OAM DMA will use page 2
 	STA $4014					; (+518 CPU cycles) Run the OAM DMA with page 2.
-	LDA #32*4					; (+2 CPU cycles) Load A with 32*4 (128, or $80) which is the OAM address for the object we initialized.
+	LDA #8*4					; (+2 CPU cycles) Load A with 8*4 (32, or $20) which is the OAM address for the object we initialized.
 	JSR EnableRendering			; (+30 CPU cycles) Enable rendering of both the background and sprites, so the sprite zeto hit can occur.
-								; After setting up sprite 32 and running the OAM DMA, we have 1596 CPU cycles remaining before cycle 0 of scanline 0.
-	JSR Clockslide_1596			; (+1596 CPU cycles) This function just stalls for 1596 CPU cycles, so we should be at cycle 0 of scnaline 0.
+								; After setting up sprite 8 and running the OAM DMA, we have 1596 CPU cycles remaining before cycle 0 of scanline 0.
+	JSR Clockslide_1598			; (+1598 CPU cycles) This function just stalls for 1598 CPU cycles, so we should be slightly after cycle 0 of scanline 0.
 	STA $2003					; Store A ($80) at PPUOAMAddress.
-								; Now, the sprite evaluation will occur with sprite 32 getting processed first.
+								; Now, the sprite evaluation will occur with sprite 8 getting processed first.
 								; Since this object is the first one processed, PPU cycle 66 will check if it is in range of the current scanline.
-								; and if it is (it is), it will be treated as sprite zero for the purposes of triggering a sprite zero hit, despite being sprite 32.
+								; and if it is (it is), it will be treated as sprite zero for the purposes of triggering a sprite zero hit, despite being sprite 8.
 	JSR Clockslide_500			; Wait a few scanline for this entire sprite to be drawn
 	LDA $2002					; Read PPUSTATUS
 	AND #$40					; mask away every bit except the Sprite Zero Hit flag.
@@ -4483,15 +4483,15 @@ TEST_ArbitrarySpriteZeroLoop:
 	LDA #0						; Same as above. Sync to ppu cycle 0 of vblank. 
 	JSR VblSync_Plus_A  		; Same as above. Sync to ppu cycle 0 of vblank. 
 								; Same as above. We have 2386 cycles until dot 0 of scanline 0.	
-	LDX #$81					; We're going to write this at OAM $81
+	LDX #$21					; We're going to write this at OAM $81
 	JSR InitializeOAMAddrX		; (+235 CPU cycles) Similar to the other subroutine, but this one doesn't multiply X by 4.
 	.byte $00, $E3, $00, $08	; Same as above. These bytes don't get executed. Use pattern $E3.
 	LDA #02						; Same as above. A=2 for the OAM DMA.
 	STA $4014					; Same as above. Run the OAM DMA with page 2.
-	LDA #$81					; Load A with $81, which we will write to $2003 to offset the OAM address.
+	LDA #$21					; Load A with $81, which we will write to $2003 to offset the OAM address.
 	JSR EnableRendering			; Same as above. Enable rendering sprites + background.
-	JSR Clockslide_1596			; Same as above, except we're 1 CPU cycles earlier than last time. (3 PPU cycles)
-	STA $2003					; Store A ($81) at PPUOAMAddress.
+	JSR Clockslide_1598			; Same as above, except we're 1 CPU cycles earlier than last time. (3 PPU cycles)
+	STA $2103					; Store A ($81) at a mirror of PPUOAMAddress. We're using a mirror because writing here can sometimes write the wrong value. (The high byte of the target address)
 	JSR Clockslide_500			; Same as above. Wait a few scanline for this entire sprite to be drawn
 	LDA $2002					; Read PPUSTATUS
 	AND #$40					; Same as above. mask away every bit except the Sprite Zero Hit flag.
@@ -5829,13 +5829,13 @@ Clockslide_2032:       ;=6
 	RTS			       ;=2036
 ;;;;;;;
 
-Clockslide_1596:	   ;=6
+Clockslide_1598:	   ;=6
 	JSR Clockslide_500 ;=506
 	JSR Clockslide_500 ;=1006
 	JSR Clockslide_500 ;=1506
 	JSR Clockslide_50  ;=1556
-	JSR Clockslide_34  ;=1590
-	RTS			       ;=1596
+	JSR Clockslide_36  ;=1592
+	RTS			       ;=1598
 ;;;;;;;
 
 Clockslide36_Plus_A:;+6
