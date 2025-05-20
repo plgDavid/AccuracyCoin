@@ -4250,13 +4250,117 @@ TEST_Sprite0Hit_Behavior_Continued:
 	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
 	AND #$40
 	BNE FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest	
 
+	;;; Test A [Sprite Zero Hit Behavior]: Despite the 8 pixel mask, if the sprite has visible pixels beyond the mask (X>0, X<8) the Sprite Zero Hit occurs. ;;;
+	JSR WaitForVBlank
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte $00, $FC, $00, $01	; Xpos = 1
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should occur, for some sprite zero is visible.)
+	LDA $2002	; Bit 6 should be set, since the sprite zero hit should have occured.
+	AND #$40
+	BEQ FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest	
+
+	;;; Test B [Sprite Zero Hit Behavior]: Sprite zero hits can happen at Y=238. (verify for the next test) ;;;
+	JSR WaitForVBlank	
+	JSR PrintCHR
+	.word $23A1 ; At address $23A1
+	.byte $FC, $FF	; solid white square.
+	JSR ResetScroll
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte 238, $FC, $00, $08
+	JSR WaitForVBlank
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_29780 ; Wait an entire frame, since this sprite is at the bottom of the screen. (Sprite Zero hit should occur.)
+	LDA $2002	; Bit 6 should be set, since the sprite zero hit should have occured.
+	AND #$40
+	BEQ FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest
+	
+	;;; Test C [Sprite Zero Hit Behavior]: Sprite zero hits cannot happen at Y>=239. ;;;
+	JSR WaitForVBlank	
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte 239, $FC, $00, $08
+	JSR WaitForVBlank
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_29780 ; Wait an entire frame, since this sprite is at the bottom of the screen. (Sprite Zero hit should NOT occur.)
+	JSR Clockslide_500 ; wait a few more scanlines just to be sure.
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior
+	INC <currentSubTest
+
+	;;; Test D [Sprite Zero Hit Behavior]: Sprite Zero Hit test with a sprite that isn't a solid 8x8 square. ;;;
+	; If this test fails, it could be for one of two reasons.
+	; Either, A: Your sprites are being rendered one scanline higher than they should be. (Though I assume if it passes test C that's not the case)
+	; Or B: Your sprite zero hit detection isn't actually checking for "solid pixels" overlapping.
+	JSR WaitForVBlank
+	JSR PrintCHR
+	.word $2002 ; At address $2001
+	.byte $C1, $FF ; $C1 is a full 8x8 square with a single pixel missing around the middle of it.
+	JSR ResetScroll
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte $02, $C0, $00, $13	; CHR $C0 is a 1x1 pixel dot. Position ($13, $02) should be lined up perfectly so this one dot sprite falls in the 1x1 hole of the tile.
+	STX $4014 ; OAM DMA (we want to keep OAM refreshed for these tests)
+	JSR Clockslide_3000 ; Wait long enough for VBlank to be over, and a few scanlines to render. (Sprite Zero hit should miss, since the visible pixel of the sprite isn't overlapping the tile's visible pixels)
+	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior2
+	INC <currentSubTest	
+	
+	;;; Test E [Sprite Zero Hit Behavior]: The sprite zero hit flag is not set until the PPU cycle in which the dot in drawn. ;;;
+	JSR WaitForVBlank
+	JSR InitializeSpriteZero
+	;    Ypos, CHR, Att, XPos
+	.byte $00, $FC, $00, $FE
+	JSR DisableRendering
+	LDA #0
+	JSR VblSync_Plus_A
+	; the sprite zero hit will occur at X=254 of scanline 1. (cycle 255 of scanline 1, since the screen isn't rendering until cycle 1)
+	; We are now synced with dot 0 of scanline 241. (Scanline 261 is the final one before looping back to scanline 0)
+	; Every scanline is 341 PPU cycles.
+	; (21 scanlines plus scanline 0) * PPU cycles per line + cycles into line 1 before the sprite zero hit =
+	; (21+1)*341 + 255 ppu cycles until the sprite zero hit =
+	; 7757 ppu cycles until the sprite zero hit.
+	; There are 3 PPU cycles for every CPU cycle
+	; 2585.67 CPU cycles until the sprite zero hit.
+	STX $4014 ; OAM DMA ; 4 + 514 CPU cycles. 2067.67 CPU cycles left.
+	JSR EnableRendering ; +30 CPU cycles. 2037.67 CPU cycles left.
+	JSR Clockslide_2032 ; 5.67 CPU cycles left.
+	LDA $2002	; This should read 1.67 CPU cycles *BEFORE* the sprite zero hit flag is set.
+	AND #$40
+	BNE FAIL_Sprite0Hit_Behavior2
+	LDA #0
+	JSR VblSync_Plus_A
+	STX $4014 ; OAM DMA ; + 514 CPU cycles. 2071.67 CPU cycles left.
+	JSR EnableRendering ; +30 CPU cycles. 2041.67 CPU cycles left.
+	JSR Clockslide_2032 ; 5.67 CPU cycles left.
+	NOP ; 3.67 CPU cycles left.
+	NOP ; 1.67 CPU cycles left. (I chose to add an extra NOP here, in case CPU/PPU alignment affects the timing of this flag when reading $2002.)
+	LDA $2002	; This should read 2.33 CPU cycles *AFTER* the sprite zero hit flag is set.
+	AND #$40
+	BEQ FAIL_Sprite0Hit_Behavior2
+	
+	INC <currentSubTest
+	
+	
+	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
 ;;;;;;;
 
-
+FAIL_Sprite0Hit_Behavior2:
+	JSR WaitForVBlank
+	JSR DisableRendering_S
+	JSR EnableRendering_BG
+	JMP TEST_Fail
 	
 	.bank 3
 	.org $F000
@@ -5517,6 +5621,16 @@ Clockslide_2252:		;=6
 	RTS					;=2252
 ;;;;;;;
 
+Clockslide_2032:       ;=6
+	NOP
+	NOP
+	JSR Clockslide_500 ;=514
+	JSR Clockslide_500 ;=1014
+	JSR Clockslide_500 ;=1514
+	JSR Clockslide_500 ;=2014
+	JSR Clockslide_16  ;=2030
+	RTS			       ;=2036
+;;;;;;;
 
 Clockslide36_Plus_A:;+6
 	STA <$00	; +3
