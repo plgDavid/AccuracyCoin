@@ -4511,13 +4511,16 @@ FAIL_ArbitrarySpriteZero:
 
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                ENGINE                   ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
+; Just a ton of helper functions letting me save some bytes in the tests, and also key functions for loading and navigating the main menu.
 	
 	.bank 3
 	.org $F000
 
-EnableRendering:
+EnableRendering:; Enables rending both sprites and background. Does not affect the other mask flags.
 	PHA
 	LDA <PPUMASK_COPY
 	ORA #$18
@@ -4527,7 +4530,7 @@ EnableRendering:
 	RTS
 ;;;;;;;
 
-EnableRendering_BG:
+EnableRendering_BG:; Enables rending the background. Does not affect the other mask flags.
 	PHA
 	LDA <PPUMASK_COPY
 	ORA #$08
@@ -4537,7 +4540,7 @@ EnableRendering_BG:
 	RTS
 ;;;;;;;
 
-EnableRendering_S:
+EnableRendering_S:; Enables rending sprites. Does not affect the other mask flags.
 	PHA
 	LDA <PPUMASK_COPY
 	ORA #$10
@@ -4547,7 +4550,7 @@ EnableRendering_S:
 	RTS
 ;;;;;;;
 
-DisableRendering:
+DisableRendering:; Disables rending both sprites and background. Does not affect the other mask flags.
 	PHA
 	LDA <PPUMASK_COPY
 	AND #$E7
@@ -4557,17 +4560,7 @@ DisableRendering:
 	RTS
 ;;;;;;;
 
-DisableRendering_S:
-	PHA
-	LDA <PPUMASK_COPY
-	AND #$EF
-	STA <PPUMASK_COPY
-	STA $2001
-	PLA
-	RTS
-;;;;;;;
-
-DisableRendering_BG:
+DisableRendering_BG:; Disables rending the background. Does not affect the other mask flags.
 	PHA
 	LDA <PPUMASK_COPY
 	AND #$F7
@@ -4577,7 +4570,17 @@ DisableRendering_BG:
 	RTS
 ;;;;;;;
 
-EnableNMI:
+DisableRendering_S:; Disables rending sprites. Does not affect the other mask flags.
+	PHA
+	LDA <PPUMASK_COPY
+	AND #$EF
+	STA <PPUMASK_COPY
+	STA $2001
+	PLA
+	RTS
+;;;;;;;
+
+EnableNMI:; Enables the NMI. Does not affect the other PPUCRTL flags.
 	PHA
 	LDA <PPUCTRL_COPY
 	ORA #$80
@@ -4587,7 +4590,7 @@ EnableNMI:
 	RTS
 ;;;;;;;
 
-DisableNMI:
+DisableNMI:; Disables the NMI. Does not affect the other PPUCRTL flags.
 	PHA
 	LDA <PPUCTRL_COPY
 	AND #$7F
@@ -4597,22 +4600,22 @@ DisableNMI:
 	RTS
 ;;;;;;;
 
-ResetScroll:
+ResetScroll:; sets the PPU "v" register to $2000
 	LDA #$20
-	STA $2006
+	STA $2006	; Update high byte of v to $20
 	LDA #$00
-	STA $2006
-	STA $2005
-	STA $2005
+	STA $2006   ; Update low byte of v to $00
+	STA $2005	; Update fine X scroll with $00
+	STA $2005	; Update fine Y scroll with $00
 	RTS
 ;;;;;;;
 
-ClearNametable:
+ClearNametable:; Overwrites the nametable from $2000 to $27FF with $24. Attribute tables in this area are cleared to $00
 	PHA
 	LDA #$20
-	STA $2006
+	STA $2006 ; Update high byte of v to $20
 	LDA #$00
-	STA $2006
+	STA $2006 ; Update low byte of v to $00
 	LDA #$24
 	LDX #$08
 	LDY #$00
@@ -4648,7 +4651,7 @@ NTLoop3:
 	RTS
 ;;;;;;;
 
-ClearRAMExceptPage3:
+ClearRAMExceptPage3: ; Clears RAM from $0000 to $07FF, except leaving $0300 through $3FF untouched.
 	; page 3 is where I'm keeping the uninitialized RAM values, so don't clear that.
 	; also don't clear the stack, ha.
 	LDA #0
@@ -4670,8 +4673,8 @@ ClearPage5: ; Page 5 is reserved for RAM used by tests. It's a good idea to clea
 	LDX #0
 ClearPage5Loop:
 	STA $500,X
-	STA $600,X ; it also clears page 6.
-	STA $700,X ; it also clears page 7.
+	STA $600,X ; it also clears page 6. (The IRQ Vector points to $600, but there are no IRQs by default. Any test needing this space should initialize it during the test)
+	STA $700,X ; it also clears page 7. (The NMI vector points to $700, but the NMI routine is set up again at the end of any tests, so don't worry)
 	INX
 	BNE ClearPage5Loop
 	; let's also clear $50 - $5F on the zero page.
@@ -4684,7 +4687,7 @@ ClearPage5ZPLoop:
 ;;;;;;;
 
 ClearPage2: ; Page 2 is reserved for OAM. Let's clear it with FFs.
-	STX <Copy_X
+	STX <Copy_X	; Keep a copy of X
 	LDA #$FF
 	LDX #$F
 ClearPage2Loop:
@@ -4706,14 +4709,18 @@ ClearPage2Loop:
 	STA $2F0,X
 	DEX
 	BPL ClearPage2Loop
-	LDX <Copy_X
+	LDX <Copy_X ; restore X
 	RTS
 ;;;;;;;
 
 PrintText:
-	STA <Copy_A
-	STY <Copy_Y
-	STX <Copy_X
+	; Following a JSR here should be .word $HiLo (the target PPU Address)
+	; And following that .word should be a string "Hello World!" and a terminator, $FF
+	; This function updates the return address, skipping the word and bytes.
+	; Print the string (bytes) at the target PPU Address (word).
+	STA <Copy_A	; Keep a copy of the A, X, and Y registers
+	STY <Copy_Y	; ^
+	STX <Copy_X	; ^
 	LDA <dontSetPointer
 	BNE PT_dontSetPointer
 	JSR CopyReturnAddressToByte0
@@ -4745,14 +4752,18 @@ PTpostLoop:
 	LDA <dontSetPointer
 	BNE PTskipFixRTS
 	JSR FixRTS
-	LDY <Copy_Y
+	LDY <Copy_Y	; Restore Y
 PTskipFixRTS:
-	LDX <Copy_X
-	LDA <Copy_A
+	LDX <Copy_X ; Restore X
+	LDA <Copy_A ; Restore A
 	RTS
 ;;;;;;;
 
 PrintTextCentered:
+	; Following a JSR here should be .word $HiLo (the target PPU Address)
+	; And following that .word should be a string "Hello World!" and a terminator, $FF
+	; This function updates the return address, skipping the word and bytes.
+	; Print the string (bytes) at the target PPU Address (word), except center the text to the middle of the screen.
 	STA <Copy_A
 	STY <Copy_Y
 	STX <Copy_X
@@ -4816,7 +4827,9 @@ PTCskipFixRTS:
 
 
 Print32Bytes:
-	; print the 32 bytes found at the target address.
+	; Following a JSR here should be .word $HiLo (the target PPU Address)
+	; And following that word should be a second .word, acting as the "target address"
+	; print the 32 bytes found at the target address at the target PPU address.
 	STA <Copy_A
 	STY <Copy_Y
 	STX <Copy_X
@@ -4920,7 +4933,8 @@ PChrskipFixRTS:
 	RTS
 ;;;;;;;
 
-InitializeSpriteZero:
+InitializeSpriteZero:	; Sets address $200 through $203 to the values found in the 4 bytes following the JSR to this subroutine.
+	; This also adjusts the return address.
 	JSR CopyReturnAddressToByte0
 	LDY #0
 InitializeSpriteZeroLoop:
@@ -4933,7 +4947,8 @@ InitializeSpriteZeroLoop:
 	RTS
 ;;;;;;;
 
-InitializeSpriteX:
+InitializeSpriteX:	; Sets address $200+X*4 through $203+X*4 to the values found in the 4 bytes following the JSR to this subroutine.
+	; This also adjusts the return address.
 	JSR CopyReturnAddressToByte0
 	LDA #$02
 	STA <$03
@@ -4953,7 +4968,8 @@ InitializeSpriteXLoop:
 	RTS
 ;;;;;;;
 
-InitializeOAMAddrX:
+InitializeOAMAddrX:; Sets address $200+X through $203+X to the values found in the 4 bytes following the JSR to this subroutine.
+	; This also adjusts the return address.
 	JSR CopyReturnAddressToByte0
 	LDA #$02
 	STA <$03
@@ -4961,7 +4977,7 @@ InitializeOAMAddrX:
 	JMP InitializeSpriteReUseThisForOAMAddrX
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-Read32NametableBytes:
+Read32NametableBytes:	; This is ran immediately after power on, and these values are stored for future printing in the "VRAM at power on" test.
 	LDA #$20
 	STA $2006
 	LDA #$00
@@ -4977,7 +4993,7 @@ ReadNametableLoop:
 	RTS
 ;;;;;;;
 
-ReadPaletteRAM:
+ReadPaletteRAM: ; This is ran immediately after power on, and these values are stored for future printing in the "Palette RAM at power on" test.
 	LDA #$3F
 	STA $2006
 	LDA #$00
@@ -4992,10 +5008,10 @@ ReadPalLoop:
 	RTS
 ;;;;;;;
 
-DefaultPalette:
+DefaultPalette:	; The default palette for the main menu.
 	.byte $2D,$30,$30,$30,$0F,$21,$21,$21,$0F,$26,$26,$26,$0F,$2A,$2A,$2A
 	.byte $2D,$30,$30,$30,$0F,$30,$30,$30,$0F,$30,$30,$30,$0F,$30,$30,$30	
-SetUpDefaultPalette:
+SetUpDefaultPalette: ; This function overwrites palette RAM with the values in the above table.
 	LDA #$3F
 	STA $2006
 	LDA #$00
@@ -5010,7 +5026,11 @@ SetUpPaletteLoop:
 	RTS
 ;;;;;;;
 	
-CopyReturnAddressToByte0:
+CopyReturnAddressToByte0: ; Several helper functions have a series of bytes following them that need to be read to adjust how the function runs.
+	; For instance, JSR PrintText has a .word, and a string+terminator following a .byte
+	; This function just takes the return address from the previous JSR instruction, adds 1 to it, and stores both bytes in a word at address $0000
+	; That way, you can easily run LDA [$0000], Y to read the bytes that followed the JSR instruction.
+	; NOTE: This will corrupt the stack. see FixRTS below.
 	PLA
 	STA <$02
 	PLA
@@ -5029,7 +5049,8 @@ CPYRTS0:
 	PHA
 	RTS
 ;;;;;;;
-AddAToByte0:
+AddAToByte0: ; This function adds the A register to the word at $0000
+	; Since many functions pull the return address off and store values at address $0000, it's very convenient to add a number to the word at $0000 
 	CLC
 	ADC <$00
 	STA <$00
@@ -5057,7 +5078,7 @@ FixRTS:	; Correct the return address so any stack modifications for other functi
 	RTS
 ;;;;;;;
 
-LoadSuiteMenu:
+LoadSuiteMenu: ; Print a list of tests to run. If these test shave been ran before, print the results too!
 	; assume the beginning of the suite is currently stored at suitePointer
 	; print the name of the suite.
 	; set up the PPU address to $2050
@@ -5142,7 +5163,7 @@ LSM_DontExitLoop:
 	JMP LSM_Loop
 ;;;;;;;;;;;;;;;;
 	
-DrawTEST:
+DrawTEST:	; This will print "TEST", "PASS", "FAIL x" or "...." depending on if the test has yet to be ran, passed, failed, or currently in progress.
 	STY <$FE
 	STX <$FD
 	; relocate the PPU v register
@@ -5201,7 +5222,7 @@ DrawTestEnd:
 	RTS
 ;;;;;;;
 
-UpdateTESTAttributes:
+UpdateTESTAttributes: ; This will update the attributes for the test results "PASS", or "FAIL x", so they can be colored differently.
 	STY <$FE
 	STX <$FD
 	; convert the x value to the attribute address, and determine top/bottom.
@@ -5270,7 +5291,7 @@ UpdateTESTAttributes:
 	RTS
 ;;;;;;;
 
-HighlightTest:
+HighlightTest:	; Swaps the characters on the nametable from the unhighlighted varsion to the highlighted version, or vice versa. (flip bit 7)
 	JSR GetVRegisterByXIndexForMenu
 	LDA $2007
 	LDY #$00
@@ -5292,7 +5313,7 @@ HighlightLoop:
 	RTS
 ;;;;;;;
 
-GetVRegisterByXIndexForMenu:
+GetVRegisterByXIndexForMenu: ; Sets up the PPU's "v" register to print the name of the test at the right position, based on index X into the suite.
 	; $20E1 + $40*X
 	; High = ((X+3) >> 2) + 20
 	TYA
@@ -5383,7 +5404,7 @@ DoubleLDA2007:	; There are a few tests that need to read the contents of a PPU a
 	RTS
 ;;;;;;;
 
-PrepNMI_TimingTests:
+PrepNMI_TimingTests: ; This is re-used in a handful of NMI timing tests.
 	LDA #$C8	; INY opcode
 	STA $700
 	LDA #$40	; RTI opcode
@@ -5394,24 +5415,24 @@ PrepNMI_TimingTests:
 ;;;;;;;
 
 
-VRegisterByXIndexLowLUT:
+VRegisterByXIndexLowLUT:	; a look up table used in GetVRegisterByXIndexForMenu
 	.byte $E1, $21, $61, $A1
 
-AttributeNybbles:
+AttributeNybbles:			; Attribute nybbles used in UpdateTESTAttributes
 	.byte $F0, $0F
-AttributeNybblesInverse:
+AttributeNybblesInverse:	; Attribute nybbles used in UpdateTESTAttributes
 	.byte $0F, $F0
 	
-AttributePaletteNybbles:
+AttributePaletteNybbles:	; Attribute nybbles used in UpdateTESTAttributes
 	.byte $00, $55, $AA, $FF
 	
-TestPassFailBlend:
+TestPassFailBlend:			; These are used in DrawTEST. index 0 of each of these spells "TEST". index 1 spells "PASS" and so on.
 	.byte "TPF."
 	.byte "EAA."
 	.byte "SSI."
 	.byte "TSL."
 
-AsciiToCHR:
+AsciiToCHR:					; This table converts the ascii values stored in the ROM to the indexes into the pattern table I made.
 	.byte $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
 	.byte $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
 	.byte $24, $26, $24, $24, $35, $24, $24, $24, $24, $24, $32, $30, $29, $31, $25, $33
@@ -5511,7 +5532,7 @@ ExitNMI:
 	RTI
 ;;;;;;;
 
-DrawNewSuiteTable:
+DrawNewSuiteTable:	; Draws and prepares the suite, menuTabXPos
 	JSR DisableNMI
 	JSR DisableRendering
 	JSR ClearNametable
@@ -5530,7 +5551,7 @@ DrawNewSuiteTable:
 	RTS
 ;;;;;;;
 	
-WaitForVBlank:
+WaitForVBlank:	; This loops until VBlank begins. (updates the VBLank flag of $2002 to be cleared before returning)
 	LDA $2002
 WaitForVblLoop:
 	LDA $2002
@@ -5538,13 +5559,13 @@ WaitForVblLoop:
 	RTS
 ;;;;;;;
 
-ResetScrollAndWaitForVBlank:
+ResetScrollAndWaitForVBlank:	; Resets the scroll and then waits for vblank.
 	JSR ResetScroll
 	JSR WaitForVBlank
 	RTS
 ;;;;;;;
 
-ReadController1:
+ReadController1:	; Some "proper" controller reading routine. Should work properly on Famicom as well as NES.
 	LDA <controller
 	STA <controller_New
 	LDA #$01
@@ -5565,7 +5586,7 @@ RC_Loop:
 	RTS
 ;;;;;;;
 
-MaskDpadConflicts:
+MaskDpadConflicts:	; If you are holding both left + right, cancel them out. The same applies for up + down,
 	LDA <controller
 	AND <$F0
 	STA <byteF
@@ -5587,7 +5608,7 @@ MaskDpadConflicts:
 	RTS
 ;;;;;;;
 	
-DpadConflictMask:
+DpadConflictMask: ; A LUT for masking the dpad values.
 	.byte $00, $01, $02, $00, $04, $05, $06, $00, $08, $09, $0A, $08, $00, $01, $02, $00
 
 RunTest:
@@ -5640,7 +5661,8 @@ RunTest:
 	RTS
 ;;;;;;;
 
-ClearNametableFrom2240:
+ClearNametableFrom2240:	; Some "tests" just print a bunch of values on screen around VRAM address $2240.
+						; This function simply clears a good amount of VRAM from those tests.
 	LDA #$22
 	STA $2006
 	LDA #$40
@@ -5669,7 +5691,8 @@ ClearNTFrom2240Loop:
 	RTS
 ;;;;;;;
 
-PrintByte:
+PrintByte:	; Takes the A register and prints each nybble seperately as two characters on the nametable at the current "v" address.
+	; This doesn't make any stack shenanigans.
 	PHA
 	AND #$F0
 	LSR A
@@ -5683,7 +5706,7 @@ PrintByte:
 	RTS
 ;;;;;;;
 
-SetUpNMIRoutineForMainMenu:
+SetUpNMIRoutineForMainMenu:	; This sets up the values at $700 in RAM to be a JMP to the main menu's NMI routine. (The NMI points to address $700)
 	LDA #$4C
 	STA $700
 	LDA #Low(NMI_Routine)
@@ -5693,7 +5716,7 @@ SetUpNMIRoutineForMainMenu:
 	RTS
 ;;;;;;;
 
-DMASync_50CyclesRemaining:
+DMASync_50CyclesRemaining:	; Sync the CPU and the DMA, such that the DMA runs exactly 50 CPU cycles after the RTS instruction ends.
 	JSR DMASync
 	; the DMA is in 406 cycles;
 	JSR Clockslide_100 ; 406 -> 306
@@ -5702,7 +5725,7 @@ DMASync_50CyclesRemaining:
 	JSR Clockslide_50  ; 106 -> 56
 	RTS ; 56 -> 50 cycles after this RTS, a DMA will occur.
 	
-DMASync_50MinusACyclesRemaining:
+DMASync_50MinusACyclesRemaining: ; Sync the CPU and the DMA, such that the DMA runs exactly 50-A CPU cycles after the RTS instruction ends.
 	JSR DMASync
 	; the DMA is in 400 cycles;
 	JSR Clockslide_100 ; 406 -> 306
@@ -5714,7 +5737,11 @@ DMASync_50MinusACyclesRemaining:
 	JSR Clockslide36_Plus_A	; 92 -> (56-A)
 	RTS ; (56-A) -> (50-A) cycles after this RTS, a DMA will occur.
 
-	; various clockslides
+	; A giant list of ClockSlides!
+	; "What's a clockslide?"
+	; It's just a subroutine that wastes a precise amount of CPU cycles.
+	; If you want to waste exactly n cycles, run JSR Clockslide_n
+	; (Clockslide_14 through Clocklside_50 are defined, and most larger clockslides are a combination of JSRs to those clockslides)
 Clockslide_100:       ;=6
 	JSR Clockslide_38 ;=44
 	JSR Clockslide_50 ;=94
@@ -5849,7 +5876,7 @@ Clockslide36_Plus_A:;+6
 	JMP [$0000]	; 5 + A + 6
 ;;;;;;;;;;;;;;;;;
 
-VblSync_Plus_A_End: ; Moved here for space.
+VblSync_Plus_A_End: ; Moved here for space. This is the end of the VblSync_Plus_A subroutine.
 	JSR Clockslide_29780
 	JSR Clockslide_29750
 	NOP
