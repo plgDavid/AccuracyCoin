@@ -201,7 +201,8 @@ result_NMI_Disabled_VBL_Start = $456
 
 result_Sprite0Hit_Behavior = $457
 result_ArbitrarySpriteZero = $458
-
+result_SprOverflow_Behavior = $459
+result_MisalignedOAM_Behavior = $45A
 
 
 result_PowOn_CPURAM = $0480
@@ -555,9 +556,11 @@ Suite_PPUBehavior:
 	
 	;; Sprite Zero Hits ;;
 Suite_SpriteZeroHits:
-	.byte "Sprite Zero Hits", $FF
+	.byte "Sprite Zero Hits and Overflow", $FF
 	table "Sprite 0 Hit behavior", $FF, result_Sprite0Hit_Behavior, TEST_Sprite0Hit_Behavior
 	table "Arbitrary Sprite zero", $FF, result_ArbitrarySpriteZero, TEST_ArbitrarySpriteZero
+	table "Sprite overflow behavior", $FF, result_SprOverflow_Behavior, TEST_SprOverflow_Behavior
+	table "Misaligned OAM behavior", $FF, result_MisalignedOAM_Behavior, TEST_MisalignedOAM_Behavior
 
 	.byte $FF
 	
@@ -4473,10 +4476,11 @@ TEST_ArbitrarySpriteZeroLoop:
 	;	- To be clear, there is also some very specific behavior with misaligned OAM (if the y position is NOT in range) that cannot be checked with sprite zero hits.
 	;	- That will be tested in a different test.
 	; Let's begin with a misaligned object that passes the "Y Position in range of scanline check"
-	; Let's write all of this at $0281.
+	; Let's write all of this at $0221.
 	; Keep in mind, the OAM attribute byte doesn't have bits 2, 3, or 4, and since we're misaligned, now our CHR Pattern is missing those bits.
 	; The CHR Pattern of our choice is essentially bitwise ANDed with $E3.
 	; That's why tile $E3 in the pattern data is just a full square.
+MisalignedOAM_SpriteZeroTest:   ; I re-use this code in the Misaligned OAM test.
 	JSR ClearPage2				; Same as above. Clear page 2.
 	JSR WaitForVBlank			; Same as above. Wait for VBlank.
 	JSR DisableRendering		; Same as above. Disable rendering for the VBL Sync subroutine.
@@ -4500,15 +4504,304 @@ TEST_ArbitrarySpriteZeroLoop:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
+;;;;;;;
 	
 FAIL_ArbitrarySpriteZero:
+FAIL_SprOverflow:
+FAIL_MisalignedOAM:
 	JSR WaitForVBlank
 	JSR DisableRendering_S
 	JSR EnableRendering_BG
 	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+
+SpriteOverflowLUT:
+	.byte $00, $FC, $00, $80
+	; Y position = $00 (top of screen)
+	; Pattern = $FC (solid white square)
+	; Attributes = 0 (not flipped, palette 0)
+	; X Position = $80 (middle of screen)
+	
+	JMP FAIL_ArbitrarySpriteZero ; Disable rendering sprites *and* fail the test.
+
+TEST_SprOverflow_Behavior:
+	;;; Test 1 [Sprite Overflow Behavior]: 9 sprites in a single scanline will set the Sprite Overflow Flag. ;;;
+	JSR ClearPage2
+	LDA #0
+	TAX
+	TAY
+SprOverflow_PrepLoop:
+	LDA SpriteOverflowLUT, Y
+	STA $200, X
+	INX
+	INY
+	CPY #4
+	BNE SprOverflow_Prep1
+	LDY #0
+SprOverflow_Prep1:
+	CPX #4*9
+	BNE SprOverflow_PrepLoop
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; Set up OAM so objects 0 through 8 exist on scanline 1.
+	JSR EnableRendering	; Enable both the background and sprites.
+	JSR Clockslide_3000 ; wait long enough for these to render.
+	LDA $2002
+	AND #$20 ; Bit 5 holds the sprite overflow flag
+	BEQ FAIL_SprOverflow
+	INC <currentSubTest	
+	
+	;;; Test 2 [Sprite Overflow Behavior]: The Sprite Overflow Flag is NOT the same thing as the CPU's V flag. ;;;
+	; The first emulator I ever made was making this mistake, ha! I doubt anybody is making this mistake, but I'll test for it anyway.
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; Set up OAM so objects 0 through 8 exist on scanline 1.
+	CLV	; Clear CPU V flag
+	JSR Clockslide_3000 ; wait long enough for these to render.
+	BVS FAIL_SprOverflow ; The CPU V flag should not have been set by the PPU.
+	CLV	; Likewise, clearing this will not clear the Sprite Overflog flag.
+	LDA $2002
+	AND #$20 ; Bit 5 holds the sprite overflow flag
+	BEQ FAIL_SprOverflow
+	INC <currentSubTest		
+	
+	;;; Test 3 [Sprite Overflow Behavior]: 8 sprites in a single scanline will not set the Sprite Overflow Flag. ;;;
+	LDA #$FF
+	STA $200	; move sprite zero to Y=$FF (does not get rendered ever)
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; Set up OAM so objects 0 through 7 exist on scanline 1.
+	JSR Clockslide_3000 ; wait long enough for these to render.
+	LDA $2002
+	AND #$20 ; Bit 5 holds the sprite overflow flag. (in this case, not set because only 8 sprites existed on the busiest scanline)
+	BNE FAIL_SprOverflow
+	INC <currentSubTest		
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+	
+MisalignedOAM_Test:
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014
+	JSR DisableRendering
+	LDA #0
+	JSR VblSync_Plus_A
+	; Sync to dot 0 of vblank
+	JSR Clockslide_100
+	JSR Clockslide_100
+	JSR Clockslide_32
+	LDA #02						; Same as above. A=2 for the OAM DMA.
+	STA $4014					; Same as above. Run the OAM DMA with page 2.
+	JSR EnableRendering			; Same as above. Enable rendering sprites + background.
+	JSR Clockslide_1598			; Same as above, except we're 1 CPU cycles earlier than last time. (3 PPU cycles)
+	RTS
+;;;;;;;
+
+FAIL_MisalignedOAM_Behavior:
+	JMP FAIL_MisalignedOAM
+	
+TEST_MisalignedOAM_Behavior:
+	;;; Test 1 [Arbitrary Sprite Zero]: Misaligned OAM can properly draw a sprite and trigger a sprite zero hit. ;;;
+	; This is genuinely the exact same test as [Arbitrary Sprite Zero] test 3.
+	; If this doesn't work, then It is assumed misaligned OAM is not working at all.
+	JSR PREP_SpriteZeroHit			
+	JSR MisalignedOAM_SpriteZeroTest
+	CMP #1
+	BNE FAIL_MisalignedOAM_Behavior
+	INC <currentSubTest	
+	
+	;;; Test 2 [Arbitrary Sprite Zero]: Misaligned OAM "+1 behavior" ;;;
+	INC <currentSubTest	 ; NOT YET IMPLEMENTED
 
 
 
+	;;; Test 3 [Arbitrary Sprite Zero]: Misaligned OAM "+4 behavior" Offset by 1 ;;;
+	; OAM will be offset by 1.
+	JSR ClearPage2
+	LDX #0
+TEST_MisalignedOAM_P4_1_Loop:
+	LDA MisalignedOAM_LUT_Off1,X
+	STA $220, X
+	INX
+	CPX #41
+	BNE TEST_MisalignedOAM_P4_1_Loop
+	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
+	LDA #$21
+	STA $2103					; Store A ($81) at a mirror of PPUOAMAddress. We're using a mirror because writing here can sometimes write the wrong value. (The high byte of the target address)
+	JSR Clockslide_500
+	LDA $2002
+	AND #$20 ; Bit 5 holds the sprite overflow flag. (in this case, not set because only 8 sprites existed on the busiest scanline)
+	BEQ FAIL_MisalignedOAM_Behavior
+	INC <currentSubTest	
+	
+	;;; Test 4 [Arbitrary Sprite Zero]: Misaligned OAM "+4 behavior" Offset by 1, Second OAM Full, so OAMAddr +=5 ;;;
+	; OAM will be offset by 1.
+	JSR ClearPage2
+	LDX #0
+TEST_MisalignedOAM_P4_1F_Loop:
+	LDA MisalignedOAM_LUT_Off1_Full,X
+	STA $220, X
+	INX
+	CPX #42
+	BNE TEST_MisalignedOAM_P4_1F_Loop
+	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
+	LDA #$21
+	STA $2103					; Store A ($81) at a mirror of PPUOAMAddress. We're using a mirror because writing here can sometimes write the wrong value. (The high byte of the target address)
+	JSR Clockslide_500
+	LDA $2002
+	AND #$20 ; Bit 5 holds the sprite overflow flag. (in this case, not set because only 8 sprites existed on the busiest scanline)
+	BEQ FAIL_MisalignedOAM_Behavior
+	INC <currentSubTest	
+
+	;;; Test 5 [Arbitrary Sprite Zero]: Misaligned OAM "+4 behavior" Offset by 2 ;;;
+	; OAM will be offset by 2.
+	JSR ClearPage2
+	LDX #0
+TEST_MisalignedOAM_P4_2_Loop:
+	LDA MisalignedOAM_LUT_Off2,X
+	STA $220, X
+	INX
+	CPX #39
+	BNE TEST_MisalignedOAM_P4_2_Loop
+	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
+	LDA #$22
+	STA $2203					; Store A ($81) at a mirror of PPUOAMAddress. We're using a mirror because writing here can sometimes write the wrong value. (The high byte of the target address)
+	JSR Clockslide_500
+	LDA $2002
+	AND #$20 ; Bit 5 holds the sprite overflow flag. (in this case, not set because only 8 sprites existed on the busiest scanline)
+	BEQ FAIL_MisalignedOAM_Behavior1
+	INC <currentSubTest	
+
+	;;; Test 6 [Arbitrary Sprite Zero]: Misaligned OAM "+4 behavior" Offset by 3 ;;;
+	JSR ClearPage2
+	LDX #0
+TEST_MisalignedOAM_P4_3_Loop:
+	LDA MisalignedOAM_LUT_Off3,X
+	STA $220, X
+	INX
+	CPX #40
+	BNE TEST_MisalignedOAM_P4_3_Loop
+	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
+	LDA #$23
+	STA $2303					; Store A ($81) at a mirror of PPUOAMAddress. We're using a mirror because writing here can sometimes write the wrong value. (The high byte of the target address)
+	JSR Clockslide_500
+	LDA $2002
+	AND #$20 ; Bit 5 holds the sprite overflow flag. (in this case, not set because only 8 sprites existed on the busiest scanline)
+	BEQ FAIL_MisalignedOAM_Behavior1
+	INC <currentSubTest	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+	
+FAIL_MisalignedOAM_Behavior1:
+	JMP FAIL_MisalignedOAM
+	
+MisalignedOAM_LUT_Off1:
+	; Misaligned +1
+	.byte $FF
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $80 ; Y position is in range of this scanline, X position is not. (OAM++; OAM &= $FC) (That $80 is now the first byte processed for the next object)
+	.byte $E3, $FF, $FF		 ; OAM is aligned again.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+
+	; object 7 is processed as $80, $E3, $00, $00
+	; object 8 is processed as $00, $E3, $00, $00
+	; If this was aligned, it looks like this: (upwards of 8 in a single scanline)
+	; $FF, $00, $E3, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $80, $E3, $FF, $FF
+	; $00, $E3, $00, $00
+	
+MisalignedOAM_LUT_Off1_Full:
+	; Misaligned +1
+	.byte $FF
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $80 ; Y position is in range of this scanline, X position is not. (OAM++; OAM &= $FC) (That $80 is now the first byte processed for the next object)
+	.byte $E3, $FF, $FF, $00 ; OAM is aligned, but since this object isn't in range, and 2nd OAM is full, due to a hardware bug OAM += 5.
+	.byte $FF, $00, $E3, $00 ; X position and Y position are both in range of this scanline.
+	; object 7 is processed as $80, $--, $--, $--, $-- (womp womp not in range. add 5 for some reason, ha!)
+	; object 8 is processed as $00, $E3, $00, $00
+	; If this was aligned, it looks like this: (upwards of 8 in a single scanline)
+	; $FF, $00, $E3, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $00, $E3, $00, $00
+	; $80, $E3, $FF, $FF
+	; $00, $E3, $00, $00
+	
+MisalignedOAM_LUT_Off2:
+	; Misaligned +2
+	.byte $FF, $FF
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $00, $00, $80 ; Y position is in range of this scanline, X position is not. (OAM++; OAM &= $FC) (That second $00 is now the first byte processed for the next object)
+	.byte $00	  			 ; OAM is aligned again.
+	; object 8 is processed as $00, $00, $80, $00
+	; If this was aligned, it looks like this: (upwards of 8 in a single scanline)
+	; $FF, $FF, $00, $E3
+	; $E3, $00, $00, $00
+	; $E3, $00, $00, $00
+	; $E3, $00, $00, $00
+	; $E3, $00, $00, $00
+	; $E3, $00, $00, $00
+	; $E3, $00, $00, $00
+	; $00, $00, $80, $00
+	; $FF, $FF, $FF, $FF
+	
+MisalignedOAM_LUT_Off3:
+	; Misaligned +3
+	.byte $FF, $FF, $FF
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $80 ; X position and Y position are both in range of this scanline.
+	.byte $FF, $FF, $00
+	; If this was aligned, it looks like this: (upwards of 8 in a single scanline)
+	; $FF, $FF, $00, $E3
+	; $00, $00, $00, $E3
+	; $00, $00, $00, $E3
+	; $00, $00, $00, $E3
+	; $00, $00, $00, $E3
+	; $00, $00, $00, $E3
+	; $00, $00, $00, $E3
+	; $00, $00, $00, $E3
+	; $00, $80, $FF, $FF
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
