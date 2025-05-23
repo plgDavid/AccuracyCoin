@@ -203,7 +203,7 @@ result_Sprite0Hit_Behavior = $457
 result_ArbitrarySpriteZero = $458
 result_SprOverflow_Behavior = $459
 result_MisalignedOAM_Behavior = $45A
-result_2003Corruption = $45B
+result_Address2004_Behavior = $45B
 
 
 result_PowOn_CPURAM = $0480
@@ -562,6 +562,8 @@ Suite_SpriteZeroHits:
 	table "Arbitrary Sprite zero", $FF, result_ArbitrarySpriteZero, TEST_ArbitrarySpriteZero
 	table "Sprite overflow behavior", $FF, result_SprOverflow_Behavior, TEST_SprOverflow_Behavior
 	table "Misaligned OAM behavior", $FF, result_MisalignedOAM_Behavior, TEST_MisalignedOAM_Behavior
+	table "Address $2004 behavior", $FF, result_Address2004_Behavior, TEST_Address2004_Behavior
+
 	.byte $FF
 	
 	
@@ -4494,6 +4496,7 @@ TEST_ArbitrarySpriteZeroLoop:
 	; The CHR Pattern of our choice is essentially bitwise ANDed with $E3.
 	; That's why tile $E3 in the pattern data is just a full square.
 MisalignedOAM_SpriteZeroTest:   ; I re-use this code in the Misaligned OAM test.
+Address2004_SpriteZeroTest:     ; I also re-use this code in the $2004 behavior test.
 	JSR ClearPage2				; Same as above. Clear page 2.
 	JSR WaitForVBlank			; Same as above. Wait for VBlank.
 	JSR DisableRendering		; Same as above. Disable rendering for the VBL Sync subroutine.
@@ -4525,6 +4528,7 @@ MisalignedOAM_SpriteZeroTest:   ; I re-use this code in the Misaligned OAM test.
 FAIL_ArbitrarySpriteZero:
 FAIL_SprOverflow:
 FAIL_MisalignedOAM:
+FAIL_Address2004:
 	JSR WaitForVBlank
 	JSR DisableRendering_S
 	JSR EnableRendering_BG
@@ -4779,10 +4783,10 @@ TEST_MisalignedOAM_P4_1_Loop:
 	; OAM $0D: [$00, $E3, $00, $00]
 	; OAM $11: [$00, $E3, $00, $00]
 	; OAM $15: [$00, $E3, $00, $00]
-	; OAM $19: [$00, $E3, $00, $00]
-	; OAM $1D: [$00, $E3, $00, $80] This X value ($80, at OAM address $20) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $20)
-	; OAM $20: [$80]($E3, $FF, $FF) This Y values is also not in range, so add 4 (and bitwise AND with $FC)
+	; OAM $19: [$00, $E3, $00, $80] This X value ($80, at OAM address $20) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $1C)
+	; OAM $1C: [$80]($E3, $FF, $FF) This Y values is also not in range, so add 4 (and bitwise AND with $FC)
 	; OAM $20: [$00, $E3, $00, $00]
+	; OAM $24: [$00, $E3, $00, $00]
 
 	; This puts 9 objects in range of this scanline, so the sprite overflow flag is set!
 	; (By the way, the sprites are only processed like this for a single scanline. The rest of the scanlines, PPUOAMAddress will be $00 going into sprite evaluation.)
@@ -4792,7 +4796,7 @@ TEST_MisalignedOAM_P4_1_Loop:
 	BEQ FAIL_MisalignedOAM_Behavior1
 	INC <currentSubTest	
 
-	;;; Test 5 [Misaligned OAM Behavior]: Misaligned OAM "+4* behavior" Offset by 1, Second OAM Full, so OAMAddr +=5 (* Only +1 with the X Position) ;;;;;;
+	;;; Test 5 [Misaligned OAM Behavior]: Misaligned OAM "+4* behavior" Offset by 1, Second OAM Full, so OAMAddr +=5 (* Only +1 with the X Position) ;;;
 	; OAM will be offset by 1.
 	JSR ClearPage2
 	LDX #0
@@ -4832,7 +4836,7 @@ FAIL_MisalignedOAM_Behavior1:
 	JMP FAIL_MisalignedOAM
 
 TEST_MisalignedOAM_Continue:
-	;;; Test 6 [Misaligned OAM Behavior]: Misaligned OAM "+4* behavior" Offset by 2 (* Only +1 with the X Position) ;;;;;;
+	;;; Test 6 [Misaligned OAM Behavior]: Misaligned OAM "+4* behavior" Offset by 2 (* Only +1 with the X Position) ;;;
 	; OAM will be offset by 2.
 	JSR ClearPage2
 	LDX #0
@@ -4867,7 +4871,7 @@ TEST_MisalignedOAM_P4_2_Loop:
 	BEQ FAIL_MisalignedOAM_Behavior1
 	INC <currentSubTest	
 
-	;;; Test 7 [Misaligned OAM Behavior]: Misaligned OAM "+4* behavior" Offset by 3 (* Only +1 with the X Position) ;;;;;;
+	;;; Test 7 [Misaligned OAM Behavior]: Misaligned OAM "+4* behavior" Offset by 3 (* Only +1 with the X Position) ;;;
 	JSR ClearPage2
 	LDX #0
 TEST_MisalignedOAM_P4_3_Loop:
@@ -4901,6 +4905,7 @@ TEST_MisalignedOAM_P4_3_Loop:
 	BEQ FAIL_MisalignedOAM_Behavior1
 	
 	;; END OF TEST ;;
+	JSR DisableRendering_S
 	LDA #1
 	RTS
 ;;;;;;;
@@ -4973,9 +4978,9 @@ MisalignedOAM_LUT_Off1:
 	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 	.byte $00, $E3, $00, $80 ; Y position is in range of this scanline, X position is not. (OAM++; OAM &= $FC) (That $80 is now the first byte processed for the next object)
 	.byte $E3, $FF, $FF		 ; OAM is aligned again.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 
 	; object 7 is processed as $80, $E3, $00, $00
@@ -5067,6 +5072,147 @@ MisalignedOAM_LUT_Off3:
 	; $00, $00, $00, $E3
 	; $00, $00, $00, $E3
 	; $00, $80, $FF, $FF
+
+FAIL_Address2004_Behavior:
+	JMP FAIL_Address2004
+
+TEST_Address2004_Behavior:
+	;;; Test 1 [Address $2004 behavior]: Writes to $2004 update OAM, and increment the OAM address by 1 ;;;
+	JSR DisableRendering
+	LDA #0
+	STA <dontSetPointer
+	JSR PrintCHR	; Put a white square at $2001 on the nametable.
+	.word $2001
+	.byte $FC, $FF	
+	JSR ClearPage2
+	JSR ResetScrollAndWaitForVBlank
+	LDA #2
+	STA $4014 ; run the OAM DMA, overwriting the whole thing with $FF
+	LDA #0
+	LDY #$FC
+	STA $2004	; write $00 to OAM $00
+	STY $2004	; write $FC to OAM $01
+	STA $2004	; write $00 to OAM $02
+	LDA #8
+	STA $2004	; write $08 to OAM $03
+	; Due to how writing here increments the OAM address, the sprite zero hit won't occur during scanline 1. It will instead occur during scanline 2, but this test is just checking to see if it happens at all.
+	JSR EnableRendering
+	JSR Clockslide_3000 ; Wait long enough for the sprite zero hit to occur.
+	LDA $2002
+	AND #$40
+	BEQ FAIL_Address2004_Behavior
+	INC <currentSubTest
+	
+	;;; Test 2 [Address $2004 behavior]: Reads from $2004 give you a value in OAM, but do not increment the OAM address ;;;
+	JSR ClearPage2
+	LDA #$5A
+	STA $200
+	LDA #$A5
+	STA $201
+	JSR WaitForVBlank
+	LDA #2
+	STA $4014 ; run the OAM DMA with page 2.
+	LDA $2004
+	CMP #$5A
+	BNE FAIL_Address2004_Behavior	; You should read the value $5A. (This doesn't use a buffer like reading $2007)
+	LDA $2004
+	CMP #$5A
+	BNE FAIL_Address2004_Behavior	; The OAM Address didn't increment, so the value will still be $5A.
+	INC <currentSubTest
+	
+	;;; Test 3 [Address $2004 behavior]: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering enabled) will always read $FF ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014
+	JSR DisableRendering
+	LDA #0
+	JSR VblSync_Plus_A
+	; Sync to dot 0 of vblank
+	LDA #02
+	STA $4014
+	JSR EnableRendering
+	JSR Clockslide_1830
+	; we have about 17 PPU cycles until dot 0 of scanline 0
+	NOP	; +6 cycles
+	NOP	; +6 cycles
+	LDA $2004	; +9 cycles before the read.
+	CMP #$FF
+	BNE FAIL_Address2004_Behavior1	; Despite OAM Address $00 being $5A, the PPU is busy clearing Secondary-OAM to $FF, so this will read $FF.
+	INC <currentSubTest
+	
+	;;; Test 4 [Address $2004 behavior]: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering disabled) does a regular read of $2004 ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014
+	JSR DisableRendering
+	LDA #0
+	JSR VblSync_Plus_A
+	; Sync to dot 0 of vblank
+	LDA #02
+	STA $4014
+	JSR DisableRendering
+	JSR Clockslide_1830
+	; we have about 17 PPU cycles until dot 0 of scanline 0
+	NOP	; +6 cycles
+	NOP	; +6 cycles
+	LDA $2004	; +9 cycles before the read.
+	CMP #$5A
+	BNE FAIL_Address2004_Behavior1	; Despite being between cycle 1 and 64 of a visible scanline, since rendering is disabled, it reads $5A.
+	INC <currentSubTest
+	
+	;;; Test 5 [Address $2004 behavior]: Writing to $2004 on a visible scanline increments the OAM address by 4 ;;;
+	LDA #$8C
+	STA $204
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014
+	JSR DisableRendering
+	LDA #0
+	JSR VblSync_Plus_A
+	; Sync to dot 0 of vblank
+	LDA #02
+	STA $4014
+	JSR EnableRendering
+	JSR Clockslide_1816
+	; we have about 59 PPU cycles until dot 0 of scanline 0
+	NOP			;+6
+	NOP			;+6
+	NOP			;+6
+	NOP			;+6
+	LDA #0		;+6
+	STA $2004	;+9 before write (+3 after). write with 20 ppu cycles until dot 0.
+	STA $2001   ;+9 before write, disable rendering with 8 ppu cycles before dot 0.
+	LDA $2004
+	CMP #$8C
+	BNE FAIL_Address2004_Behavior1	; Despite being between cycle 1 and 64 of a visible scanline, since rendering is disabled, it reads $5A.
+	INC <currentSubTest
+
+	;;; Test 6 [Address $2004 behavior]: Writing to $2004 on a visible scanline doesn't write to OAM ;;;
+	; leeching off the results of the previous test...
+	; PPUOAMAddress is currently 4
+	LDX #4
+TEST_Address2004_Behavior_Loop:
+	STA $2004	; A = $8C, so we're overwriting all of OAM with $8C right now.
+	INX
+	BNE TEST_Address2004_Behavior_Loop
+	; OAM Address is now 0.
+	; If writing during rendering wrote a value, this address would be $00. Instead, it should be $5A.
+	LDA $2004
+	CMP #$5A
+	BNE FAIL_Address2004_Behavior1
+
+	;; END OF TEST ;;
+	JSR DisableRendering_S
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_Address2004_Behavior1:
+	JMP FAIL_Address2004
+
+
+
+
 
 
 
@@ -6253,6 +6399,7 @@ ClearNTFrom2240Loop:
 PrintByte:	; Takes the A register and prints each nybble seperately as two characters on the nametable at the current "v" address.
 	; This doesn't make any stack shenanigans.
 	PHA
+	PHA
 	AND #$F0
 	LSR A
 	LSR A
@@ -6262,6 +6409,7 @@ PrintByte:	; Takes the A register and prints each nybble seperately as two chara
 	PLA
 	AND #$0F
 	STA $2007
+	PLA
 	RTS
 ;;;;;;;
 
