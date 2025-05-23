@@ -4446,7 +4446,6 @@ TEST_ArbitrarySpriteZeroLoop:
 	; The old PPUOAMAddress & $F8
 	; The new PPUOAMAddress & $F8
 	; So we also want to the 8 values starting at $20 to match the 8 values we want at the new PPUOAMAddress
-	
 
 	; Since this test is a doozy, I will comment every line and explain why I'm doing this.
 	JSR ClearPage2				; Let's clear page 2. I'm using page 2 for the OAM DMA, so OAM will be a copy of $200 - $2FF
@@ -4611,7 +4610,7 @@ MisalignedOAM_Test:
 	LDA #02
 	STA $4014
 	JSR EnableRendering
-	JSR Clockslide_1830
+	JSR Clockslide_1816
 	RTS
 ;;;;;;;
 
@@ -4630,7 +4629,6 @@ TEST_MisalignedOAM_Behavior:
 	INC <currentSubTest	
 	
 	;;; Test 2 [Misaligned OAM Behavior]: Misaligned OAM "+4 behavior" Offset by 1" ;;;	
-	;;; THIS TEST HAS CPU/PPU CLOCK ALIGNMENT SPECIFIC RESULTS, AND CAN FAIL BECAUSE OF THE ALIGNMENT ;;;
 	
 	; In the "Arbitrary Sprite Zero" test, I said the following:
 	; 	- Depending on how the evaluation goes, modify PPUOAMAddress. Typically increment by 1 or 4. (actually "it's complicated", but that's for a different test.)
@@ -4665,21 +4663,7 @@ TEST_MisalignedOAM_Behavior:
 	; And we can test for this behavior by misaligning OAM, having it get re-aligned, and then putting 9 objects on a single scanline to set the Sprite Overflow flag.
 	; If the behavior does not match the console, then the data processed will intentionally be set up such that the sprite overflow flag doesn't get set.
 	
-	; NOTES FOR SOMEONE EDITING THIS ROM, ATTEMPTING TO FIX THIS TEST SO THERE'S NOT CPU/PPU CLOCK ALIGNMENT ISSUES:
-	; There's not a good way to run this test while preventing the $2003 corruption...
-	; So as of right now this test CAN fail on console depending on the CPU/PPU clock alignment.
-	; TODO: Look into this some more?
-	;	- Stuff I already tried include:
-	;		- Making the test occur at OAM Address $00 + offset, but keeping the bytes at OAM address $00 - $07 the same values at the bytes from OAM Address $20 - $27.
-	;			- This didn't work because my test for the +5 behavior could never be in a situation where the Y position of the 9th object processed wasn't in range for the scanline. (if the first object was)
-	;		- Increment PPUOAMAddr by writing to $2004, leaving the tests at OAM address $00 + offset
-	;			- The increment adds 4 if rendering is enabled and this happens on a visible scanline.
-	;			- Okay, so disable rendering and then increment by 1, then re-enable rendering?
-	;			- Great... Now we have to worry about OAM corruption.
-	;			- And since I have no idea how to force OAM corruption to always occur on "row 0", I once again have clock alignment issues. Ah!
-	;			- So anyway, I went back to using the $2003 method since the $2004 method involves and extra scanline worth of sprite evaluation, and I'd prefer if the first scanline with sprite evaluation was the one to focus on.
-	;			- That helps make debugging easier for someone wanting to make their emulator pass this one, so... the $2003 method wins.
-	
+	; To assist in debugging, the sprite evaluation for all of these tests will occur on scanline 0, and will be the first objects evaluated, starting at dot 65.
 	
 	; Before this test, let's clear page 2 (with $FFs).
 	JSR ClearPage2
@@ -4687,24 +4671,27 @@ TEST_MisalignedOAM_Behavior:
 	LDX #0
 TEST_MisalignedOAM_P4_Y_1_Loop:
 	LDA MisalignedOAM_Y_LUT_Off1,X
-	STA $280, X
+	STA $200, X
 	INX
 	CPX #41
 	BNE TEST_MisalignedOAM_P4_Y_1_Loop
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
-	LDA #$81
-	STA $2003					; Store A ($81) at PPUOAMAddress. (And the jank $2003 behavior should copy 8 instances of $FF to OAM[20])
+	LDA #1			; The data we want to process in OAM first is at address 1.
+	STA $2002		; Write this to $2002 to prime to PPU Data bus.
+	LDX #0			; We're going to write to $2003 with an offset.
+	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
+
 	; Okay, so here's how these objects get processed.
-	; OAM $81: [$00, $E3, $00, $00]
-	; OAM $85: [$00, $E3, $00, $00]
-	; OAM $89: [$00, $E3, $00, $00]
-	; OAM $8D: [$00, $E3, $00, $00]
-	; OAM $91: [$00, $E3, $00, $00]
-	; OAM $95: [$00, $E3, $00, $00]
-	; OAM $99: [$80]($FF, $FF, $00) This is NOT in range, so the only byte processed here is $80. PPUOAMAddress+=4; PPUOAMAddress&=$FC; (PPUOAMAddress is now $9C)
-	; OAM $9C: [$00, $E3, $00, $00]
-	; OAM $A0: [$00, $E3, $00, $00]
-	; OAM $A4: [$00, $E3, $00, $00]
+	; OAM $01: [$00, $E3, $00, $00]
+	; OAM $05: [$00, $E3, $00, $00]
+	; OAM $09: [$00, $E3, $00, $00]
+	; OAM $0D: [$00, $E3, $00, $00]
+	; OAM $11: [$00, $E3, $00, $00]
+	; OAM $15: [$00, $E3, $00, $00]
+	; OAM $19: [$80]($FF, $FF, $00) This is NOT in range, so the only byte processed here is $80. PPUOAMAddress+=4; PPUOAMAddress&=$FC; (PPUOAMAddress is now $1C)
+	; OAM $1C: [$00, $E3, $00, $00]
+	; OAM $20: [$00, $E3, $00, $00]
+	; OAM $24: [$00, $E3, $00, $00]
 	; This puts 9 objects in range of this scanline, so the sprite overflow flag is set!
 	; (By the way, the sprites are only processed like this for a single scanline. The rest of the scanlines, PPUOAMAddress will be $00 going into sprite evaluation.)
 	JSR Clockslide_500			; Wait long enough for the ppu to draw every scanline in which these objects are relevant.
@@ -4721,25 +4708,27 @@ TEST_MisalignedOAM_P4_Y_1_Loop:
 	LDX #0
 TEST_MisalignedOAM_P5_Y_1_Loop:
 	LDA MisalignedOAM_Y_LUT_Off1_Full,X
-	STA $280, X
+	STA $200, X
 	INX
 	CPX #43
 	BNE TEST_MisalignedOAM_P5_Y_1_Loop
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
-	LDA #$81
-	STA $2003					; Store A ($81) at PPUOAMAddress. (And the jank $2003 behavior should copy 8 instances of $FF to OAM[20])
+	LDA #1			; The data we want to process in OAM first is at address 1.
+	STA $2002		; Write this to $2002 to prime to PPU Data bus.
+	LDX #0			; We're going to write to $2003 with an offset.
+	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
 
 	; Okay, so here's how these objects get processed.
-	; OAM $81: [$00, $E3, $00, $00]
-	; OAM $85: [$00, $E3, $00, $00]
-	; OAM $89: [$00, $E3, $00, $00]
-	; OAM $8D: [$00, $E3, $00, $00]
-	; OAM $91: [$00, $E3, $00, $00]
-	; OAM $95: [$00, $E3, $00, $00]
-	; OAM $99: [$00, $E3, $00, $00]
-	; OAM $9D: [$00, $E3, $00, $00]
-	; OAM $A1: [$80]($FF, $FF, $FF, $FF) This is NOT in range, so the only byte processed here is $80. Secondary OAM is full, so add 5. PPUOAMAddress+=5; (PPUOAMAddress is now $A6)
-	; OAM $A6: [$00, $E3, $00, $00]
+	; OAM $01: [$00, $E3, $00, $00]
+	; OAM $05: [$00, $E3, $00, $00]
+	; OAM $09: [$00, $E3, $00, $00]
+	; OAM $0D: [$00, $E3, $00, $00]
+	; OAM $11: [$00, $E3, $00, $00]
+	; OAM $15: [$00, $E3, $00, $00]
+	; OAM $19: [$00, $E3, $00, $00]
+	; OAM $1D: [$00, $E3, $00, $00]
+	; OAM $21: [$80]($FF, $FF, $FF, $FF) This is NOT in range, so the only byte processed here is $80. Secondary OAM is full, so add 5. PPUOAMAddress+=5; (PPUOAMAddress is now $26)
+	; OAM $26: [$00, $E3, $00, $00]
 	; This puts 9 objects in range of this scanline, so the sprite overflow flag is set!
 	; (By the way, the sprites are only processed like this for a single scanline. The rest of the scanlines, PPUOAMAddress will be $00 going into sprite evaluation.)
 	JSR Clockslide_500			; Wait long enough for the ppu to draw every scanline in which these objects are relevant.
@@ -4773,24 +4762,28 @@ TEST_MisalignedOAM_P5_Y_1_Loop:
 	LDX #0
 TEST_MisalignedOAM_P4_1_Loop:
 	LDA MisalignedOAM_LUT_Off1,X
-	STA $280, X
+	STA $200, X
 	INX
 	CPX #41
 	BNE TEST_MisalignedOAM_P4_1_Loop
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
-	LDA #$81
-	STA $2003					; Store A ($81) at PPUOAMAddress. (And the jank $2003 behavior should copy 8 instances of $FF to OAM[20])
+	LDA #1			; The data we want to process in OAM first is at address 1.
+	STA $2002		; Write this to $2002 to prime to PPU Data bus.
+	LDX #0			; We're going to write to $2003 with an offset.
+	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
 	; Okay, so here's how these objects get processed.
-	; OAM $81: [$00, $E3, $00, $80] This X value ($80, at OAM address $9C) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $9C)
-	; OAM $84: [$80]($E3, $FF, $FF) This Y values is also not in range, so add 4 (and bitwise AND with $FC)
-	; OAM $88: [$00, $E3, $00, $80]
-	; OAM $8C: [$00, $E3, $00, $00]
-	; OAM $90: [$00, $E3, $00, $00]
-	; OAM $94: [$00, $E3, $00, $00]
-	; OAM $98: [$00, $E3, $00, $00]
-	; OAM $9C: [$00, $E3, $00, $00]
-	; OAM $A0: [$00, $E3, $00, $00]
-	; OAM $A4: [$00, $E3, $00, $80]
+
+	; OAM $01: [$00, $E3, $00, $80]
+	; OAM $05: [$00, $E3, $00, $00]
+	; OAM $09: [$00, $E3, $00, $00]
+	; OAM $0D: [$00, $E3, $00, $00]
+	; OAM $11: [$00, $E3, $00, $00]
+	; OAM $15: [$00, $E3, $00, $00]
+	; OAM $19: [$00, $E3, $00, $00]
+	; OAM $1D: [$00, $E3, $00, $80] This X value ($80, at OAM address $20) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $20)
+	; OAM $20: [$80]($E3, $FF, $FF) This Y values is also not in range, so add 4 (and bitwise AND with $FC)
+	; OAM $20: [$00, $E3, $00, $00]
+
 	; This puts 9 objects in range of this scanline, so the sprite overflow flag is set!
 	; (By the way, the sprites are only processed like this for a single scanline. The rest of the scanlines, PPUOAMAddress will be $00 going into sprite evaluation.)
 	JSR Clockslide_500
@@ -4805,25 +4798,27 @@ TEST_MisalignedOAM_P4_1_Loop:
 	LDX #0
 TEST_MisalignedOAM_P4_1F_Loop:
 	LDA MisalignedOAM_LUT_Off1_Full,X
-	STA $280, X
+	STA $200, X
 	INX
 	CPX #42
 	BNE TEST_MisalignedOAM_P4_1F_Loop
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
-	LDA #$81
-	STA $2003					; Store A ($81) at PPUOAMAddress. (And the jank $2003 behavior should copy 8 instances of $FF to OAM[20])
+	LDA #1			; The data we want to process in OAM first is at address 1.
+	STA $2002		; Write this to $2002 to prime to PPU Data bus.
+	LDX #0			; We're going to write to $2003 with an offset.
+	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
 	; Okay, so here's how these objects get processed.
-	; OAM $81: [$00, $E3, $00, $00]
-	; OAM $85: [$00, $E3, $00, $00]
-	; OAM $89: [$00, $E3, $00, $00]
-	; OAM $8D: [$00, $E3, $00, $00]
-	; OAM $91: [$00, $E3, $00, $00]
-	; OAM $95: [$00, $E3, $00, $00]
-	; OAM $99: [$00, $E3, $00, $00]
-	; OAM $9D: [$00, $E3, $00, $80] This X value ($80, at OAM address $A0) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $A0)
-	; OAM $A0: [$80]($E3, $FF, $FF, $FF) This Y values is also not in range and secondary OAM is full, so add 5 (PPUOAMAddress is now $A5)
-	; OAM $A5: [$00, $E3, $00, $80]
-	; OAM $AC: [$00, $E3, $00, $80]
+	; OAM $01: [$00, $E3, $00, $00]
+	; OAM $05: [$00, $E3, $00, $00]
+	; OAM $09: [$00, $E3, $00, $00]
+	; OAM $0D: [$00, $E3, $00, $00]
+	; OAM $11: [$00, $E3, $00, $00]
+	; OAM $15: [$00, $E3, $00, $00]
+	; OAM $19: [$00, $E3, $00, $00]
+	; OAM $1D: [$00, $E3, $00, $80] This X value ($80, at OAM address $20) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $20)
+	; OAM $20: [$80]($E3, $FF, $FF, $FF) This Y values is also not in range and secondary OAM is full, so add 5 (PPUOAMAddress is now $25)
+	; OAM $25: [$00, $E3, $00, $80]
+	; OAM $2C: [$00, $E3, $00, $80]
 	; This puts 9 objects in range of this scanline, so the sprite overflow flag is set!
 	; (By the way, the sprites are only processed like this for a single scanline. The rest of the scanlines, PPUOAMAddress will be $00 going into sprite evaluation.)
 	JSR Clockslide_500
@@ -4843,25 +4838,27 @@ TEST_MisalignedOAM_Continue:
 	LDX #0
 TEST_MisalignedOAM_P4_2_Loop:
 	LDA MisalignedOAM_LUT_Off2,X
-	STA $280, X
+	STA $200, X
 	INX
 	CPX #39
 	BNE TEST_MisalignedOAM_P4_2_Loop
 	LDX #0
 	LDY #$1E
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
-	LDA #$82
-	STA $2003					; Store A ($82) at PPUOAMAddress. (And the jank $2003 behavior should copy 8 instances of $FF to OAM[20])
+	LDA #2			; The data we want to process in OAM first is at address 2.
+	STA $2002		; Write this to $2002 to prime to PPU Data bus.
+	LDX #0			; We're going to write to $2003 with an offset.
+	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #02, the same as the intended write.
 	; Okay, so here's how these objects get processed.
-	; OAM $82: [$00, $E3, $10, $00]
-	; OAM $86: [$00, $E3, $20, $00]
-	; OAM $8A: [$00, $E3, $30, $00]
-	; OAM $8E: [$00, $E3, $40, $00]
-	; OAM $92: [$00, $E3, $50, $00]
-	; OAM $96: [$00, $E3, $60, $00]
-	; OAM $9A: [$00, $E3, $70, $00]
-	; OAM $9E: [$00, $E3, $00, $80] This X value ($80, at OAM address $A1) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $A0)
-	; OAM $A0: [$00, $80, $00, $00] 
+	; OAM $02: [$00, $E3, $10, $00]
+	; OAM $06: [$00, $E3, $20, $00]
+	; OAM $0A: [$00, $E3, $30, $00]
+	; OAM $0E: [$00, $E3, $40, $00]
+	; OAM $12: [$00, $E3, $50, $00]
+	; OAM $16: [$00, $E3, $60, $00]
+	; OAM $1A: [$00, $E3, $70, $00]
+	; OAM $1E: [$00, $E3, $00, $80] This X value ($80, at OAM address $21) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $20)
+	; OAM $20: [$00, $80, $00, $00] 
 	; This puts 9 objects in range of this scanline, so the sprite overflow flag is set!
 	; (By the way, the sprites are only processed like this for a single scanline. The rest of the scanlines, PPUOAMAddress will be $00 going into sprite evaluation.)
 	JSR Clockslide_500
@@ -4875,26 +4872,28 @@ TEST_MisalignedOAM_P4_2_Loop:
 	LDX #0
 TEST_MisalignedOAM_P4_3_Loop:
 	LDA MisalignedOAM_LUT_Off3,X
-	STA $280, X
+	STA $200, X
 	INX
 	CPX #40
 	BNE TEST_MisalignedOAM_P4_3_Loop
 	LDX #0
 	LDY #$1E
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
-	LDA #$83
-	STA $2003					; Store A ($81) at PPUOAMAddress. (And the jank $2003 behavior should copy 8 instances of $FF to OAM[20])
+	LDA #3			; The data we want to process in OAM first is at address 3.
+	STA $2002		; Write this to $2002 to prime to PPU Data bus.
+	LDX #0			; We're going to write to $2003 with an offset.
+	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #03, the same as the intended write.
 	; Okay, so here's how these objects get processed.
-	; OAM $83: [$00, $10, $00, $00]
-	; OAM $87: [$00, $20, $00, $00]
-	; OAM $8B: [$00, $30, $00, $00]
-	; OAM $8F: [$00, $40, $00, $00]
-	; OAM $93: [$00, $50, $00, $00]
-	; OAM $97: [$00, $60, $00, $00]
-	; OAM $9B: [$00, $70, $00, $00]
-	; OAM $9F: [$00, $80, $00, $80] This X value ($80, at OAM address $A1) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $A0)
-	; OAM $A0: [$80]($00, $80, $FF, $FF) Secondary OAM is full, so instead of the PPUOAMAddress += 4, PPUOAMAddress &= $FC behavior, it's just the PPUOAMAddress +=5 behavior. (PPUOAMAddress is now $A5)
-	; OAM $A5: [$00, $FF, $FF, $FF]
+	; OAM $03: [$00, $10, $00, $00]
+	; OAM $07: [$00, $20, $00, $00]
+	; OAM $0B: [$00, $30, $00, $00]
+	; OAM $0F: [$00, $40, $00, $00]
+	; OAM $13: [$00, $50, $00, $00]
+	; OAM $17: [$00, $60, $00, $00]
+	; OAM $1B: [$00, $70, $00, $00]
+	; OAM $1F: [$00, $80, $00, $80] This X value ($80, at OAM address $21) is NOT in range. PPUOAMAddress+=1; PPUOAMAddress&=$FC; (PPUOAMAddress is now $20)
+	; OAM $20: [$80]($00, $80, $FF, $FF) Secondary OAM is full, so instead of the PPUOAMAddress += 4, PPUOAMAddress &= $FC behavior, it's just the PPUOAMAddress +=5 behavior. (PPUOAMAddress is now $25)
+	; OAM $25: [$00, $FF, $FF, $FF]
 	; This puts 9 objects in range of this scanline, so the sprite overflow flag is set!
 	JSR Clockslide_500
 	LDA $2002
@@ -4968,15 +4967,15 @@ MisalignedOAM_Y_LUT_Off1_Full:
 MisalignedOAM_LUT_Off1:
 	; Misaligned +1
 	.byte $FF
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
+	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 	.byte $00, $E3, $00, $80 ; Y position is in range of this scanline, X position is not. (OAM++; OAM &= $FC) (That $80 is now the first byte processed for the next object)
 	.byte $E3, $FF, $FF		 ; OAM is aligned again.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 
 	; object 7 is processed as $80, $E3, $00, $00
@@ -6457,6 +6456,18 @@ Clockslide_1830:	   ;=6
 	JSR Clockslide_100 ;=1806
 	JSR Clockslide_18  ;=1824
 	RTS			       ;=1830
+;;;;;;;
+
+Clockslide_1816:	   ;=6
+	JSR Clockslide_500 ;=506
+	JSR Clockslide_500 ;=1006
+	JSR Clockslide_500 ;=1506
+	JSR Clockslide_100 ;=1606
+	JSR Clockslide_100 ;=1706
+	JSR Clockslide_100 ;=1806
+	NOP				   ;=1808
+	NOP				   ;=1810
+	RTS			       ;=1816
 ;;;;;;;
 
 Clockslide36_Plus_A:;+6
