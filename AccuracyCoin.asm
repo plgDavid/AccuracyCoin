@@ -204,6 +204,7 @@ result_ArbitrarySpriteZero = $458
 result_SprOverflow_Behavior = $459
 result_MisalignedOAM_Behavior = $45A
 result_Address2004_Behavior = $45B
+result_APURegActivation = $45C
 
 
 result_PowOn_CPURAM = $0480
@@ -242,7 +243,7 @@ RESET:
 	PLA
 	AND #$CF
 	STA PowerOn_P
-RESET_SkipPowerOnTests
+RESET_SkipPowerOnTests:
 
 	SEI
 	CLD
@@ -530,7 +531,7 @@ Suite_DMATests:
 	table "DMC DMA + OAM DMA", $FF, result_Unimplemented, DebugTest
 	table "DMC DMA Implicit Stop", $FF, result_Unimplemented, DebugTest
 	table "DMC DMA Explicit Stop", $FF, result_Unimplemented, DebugTest
-	table "APU Register Activation", $FF, result_Unimplemented, DebugTest
+	table "APU Register Activation", $FF, result_APURegActivation, TEST_APURegActivation
 	.byte $FF
 	
 	;; Power On State ;;
@@ -4682,7 +4683,7 @@ TEST_MisalignedOAM_P4_Y_1_Loop:
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
 	LDA #1			; The data we want to process in OAM first is at address 1.
 	STA $2002		; Write this to $2002 to prime to PPU Data bus.
-	LDX #0			; We're going to write to $2003 with an offset.
+	LDX #0			; We're going to write to $2003 with an offset, as a means to prevent the $2003 corruption.
 	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
 
 	; Okay, so here's how these objects get processed.
@@ -4719,7 +4720,7 @@ TEST_MisalignedOAM_P5_Y_1_Loop:
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
 	LDA #1			; The data we want to process in OAM first is at address 1.
 	STA $2002		; Write this to $2002 to prime to PPU Data bus.
-	LDX #0			; We're going to write to $2003 with an offset.
+	LDX #0			; We're going to write to $2003 with an offset, as a means to prevent the $2003 corruption.
 	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
 
 	; Okay, so here's how these objects get processed.
@@ -4773,7 +4774,7 @@ TEST_MisalignedOAM_P4_1_Loop:
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
 	LDA #1			; The data we want to process in OAM first is at address 1.
 	STA $2002		; Write this to $2002 to prime to PPU Data bus.
-	LDX #0			; We're going to write to $2003 with an offset.
+	LDX #0			; We're going to write to $2003 with an offset, as a means to prevent the $2003 corruption.
 	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
 	; Okay, so here's how these objects get processed.
 
@@ -4809,7 +4810,7 @@ TEST_MisalignedOAM_P4_1F_Loop:
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
 	LDA #1			; The data we want to process in OAM first is at address 1.
 	STA $2002		; Write this to $2002 to prime to PPU Data bus.
-	LDX #0			; We're going to write to $2003 with an offset.
+	LDX #0			; We're going to write to $2003 with an offset, as a means to prevent the $2003 corruption.
 	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #01, the same as the intended write.
 	; Okay, so here's how these objects get processed.
 	; OAM $01: [$00, $E3, $00, $00]
@@ -4851,7 +4852,7 @@ TEST_MisalignedOAM_P4_2_Loop:
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
 	LDA #2			; The data we want to process in OAM first is at address 2.
 	STA $2002		; Write this to $2002 to prime to PPU Data bus.
-	LDX #0			; We're going to write to $2003 with an offset.
+	LDX #0			; We're going to write to $2003 with an offset, as a means to prevent the $2003 corruption.
 	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #02, the same as the intended write.
 	; Okay, so here's how these objects get processed.
 	; OAM $02: [$00, $E3, $10, $00]
@@ -4885,7 +4886,7 @@ TEST_MisalignedOAM_P4_3_Loop:
 	JSR MisalignedOAM_Test		; Sync with (approximately) dot 0 of scaline 0.
 	LDA #3			; The data we want to process in OAM first is at address 3.
 	STA $2002		; Write this to $2002 to prime to PPU Data bus.
-	LDX #0			; We're going to write to $2003 with an offset.
+	LDX #0			; We're going to write to $2003 with an offset, as a means to prevent the $2003 corruption.
 	STA $2003, X	; The dummy read prepared the CPU databus with the value read from the PPU databus. Now the early write to $2003 will be #03, the same as the intended write.
 	; Okay, so here's how these objects get processed.
 	; OAM $03: [$00, $10, $00, $00]
@@ -4982,7 +4983,6 @@ MisalignedOAM_LUT_Off1:
 	.byte $E3, $FF, $FF		 ; OAM is aligned again.
 	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
 	.byte $00, $E3, $00, $00 ; X position and Y position are both in range of this scanline.
-
 	; object 7 is processed as $80, $E3, $00, $00
 	; object 8 is processed as $00, $E3, $00, $00
 	; If this was aligned, it looks like this: (upwards of 8 in a single scanline)
@@ -5202,6 +5202,7 @@ TEST_Address2004_Behavior_Loop:
 	BNE FAIL_Address2004_Behavior1
 
 	;; END OF TEST ;;
+	JSR WaitForVBlank
 	JSR DisableRendering_S
 	LDA #1
 	RTS
@@ -5209,8 +5210,246 @@ TEST_Address2004_Behavior_Loop:
 
 FAIL_Address2004_Behavior1:
 	JMP FAIL_Address2004
+;;;;;;;;;;;;;;;;;;;;;;;;
+
+FAIL_APURegActivation_Pre:
+	LDA #1
+	STA <currentSubTest
+	JMP TEST_Fail
+
+FAIL_APURegActivation0:
+	JMP FAIL_APURegActivation
+
+TEST_APURegActivation:
+	;;; Test 1 [APU Register Activation]: Pre-requisite test suite: Does DMA affect the data bus? Is DMC DMA timing accurate? Is open bus accurate enough for this test? How about PPU Open Bus? What about the PPU Read buffer? ;;;
+	LDA <result_DMADMASync_PreTest	; This is written before the main menu loads when resetting the ROM. If you aren't passing this test (and using savestates), you'll need to reboot the ROM to update this value.
+	CMP #1
+	BNE FAIL_APURegActivation_Pre ; Fail if the DMC DMA doesn't update the data bus.
+	
+	JSR TEST_DMA_Plus_2007R
+	CMP #1
+	BNE FAIL_APURegActivation_Pre ; Fail if DMC DMA timing is off.
+	
+	JSR ResetScrollAndWaitForVBlank
+	LDY #$10	 ; A copy of Open Bus test 3. If this fails, then open bus isn't reliable enough for this test.
+	LDA $50F8, Y ; This offset changes the high byte of the value read, but not the data bus.
+	CMP #$50
+	BNE FAIL_APURegActivation_Pre ; Fail if open bus is faked.
+	
+	LDA #$5A
+	STA $2002
+	LDA #0
+	LDA $3000 ; use a mirror to test for mirrors too.
+	CMP #$5A
+	BNE FAIL_APURegActivation_Pre ; Fail if PPU open bus doesn't exist.
+
+	JSR WriteToPPUADDRWithByte
+	.byte $24, $00
+	.byte $A5, $FF
+	JSR ReadPPUADDRFromWord
+	.byte $24, $00
+	CMP #$A5
+	BNE FAIL_APURegActivation_Pre ; Fail if the PPU read buffer isn't working.
+
+	JSR ResetScrollAndWaitForVBlank
+	LDA #02
+	STA <currentSubTest
+	; It is assumed we're not going to crash when running this test if those 2 pre-requisites pass.
+
+	;;; Test 2 [APU Register Activation]: Pre-requisite test: Reading from $4015 clears the "frame interrupt flag" ;;;
+	SEI ; If the frame interrupt flag is set without this, we can get stuck in an infinite loop of BRK instructions.
+	LDA #0
+	STA $4017	; enable the frame counter Interrupt flag.
+	JSR Clockslide_29780 ; wait for the frame interrupt flag.
+	JSR Clockslide_100
+	LDA $4015
+	AND #$40
+	BEQ FAIL_APURegActivation0 ; If this fails, the Frame interrupt flag wasn't set? Likely not implemented.
+	LDA $4015
+	AND #$40
+	BNE FAIL_APURegActivation0 ; If this fails, the Frame interrupt flag wasn't cleared when read last time.
+	INC <currentSubTest
+	
+	;;; Test 3 [APU Register Activation]: Can the DMA read from the APU registers when the CPU is not executing out of page $40? ;;;
+	; The objective: Time a DMA just before reading from $4015.
+	
+	; What's happening here?
+	; The 2A03 chip (the CPU/APU) has an address bus.
+	; Inside the 2A03 chip are 3 address busses: The 6502 Address Bus, the DMC Address Bus, and the OAM Address bus. On any given cycle, only one of these busses can be chosen to connect to the 2A03 address bus.
+	; Here's the catch. Reading from the APU registers requires the 6502 address bus to be in the range of $4000 through $401F.
+	; If the OAM address bus is pointing to $4000 through $401F, and the 6502 address bus isn't, then the OAM DMA will only read open bus from that range.
+	; Which can be detected, since reading $4015 clears the interrupt flag.
+	
+	JSR Clockslide_29780 ; wait for the frame interrupt flag.
+	JSR Clockslide_100
+	LDA #$40
+	STA $4014	; OAM DMA with page $40.
+	; This does *NOT* read from the APU Registers!
+	LDA $4015
+	AND #$40
+	BEQ FAIL_APURegActivation0 ; If this fails, the DMA read from the APU registers.
+	INC <currentSubTest
+
+	;;; Test 4 [APU Register Activation]: Can your emulator handle the wacky setup required to determine if the APU registers are active due to the 6502 address bus? (this could cause a crash) ;;;
+	; Oh- also don't press anything on controller 2 during this test. thanks.
+	;
+	; This is possibly the most amazing test in this entire ROM.
+	;
+	; Here's the plan. (Special thanks to lidnariq and Fiskbit)
+	; Execute STA $4014 (A = $40) from address $3FFE. (The 6502 address bus will be $4000 when the OAM DMA occurs. Follow that up with a BRK from address $4001.)
+	; In order to make this work, we need the PPU data bus to be $8D, the PPU Buffer to be $14, and Open Bus to be $40
+	; So, the order of operations here is: 
+	; Prepare PPU buffer with $14. (some writes to $2006, a write to $2007, more writes to $2006, and a read from $2007)
+	; Perpare PPU data bus with $8D. Write $8D to $2002.
+	; Now, when we execute this:
+	; [$3FFE = $8D] [$3FFF = $14] [DMC DMA! Overwrite databus with $40] [$4000 = $40]
+	; Which will result in an OAM DMA where the 6502 Databus is in-fact from the range $4000 to $401F, so the OAM DMA *will* read from all the registers.
+	; And then the final value of the databus will be $00, so the following instruction will be BRK.
+	;
+	; We'll also want to set up one of the audio channels to be playing, so the results are slightly more interesting. (so APU STATUS has a value other than $00) How about the triangle channel?
+	;
+	; Okay, but what's actually happening during the DMA? 
+	;
+	; The only registers at play here are $4015, $4016, and $4017, since those are the only readable APU registers.
+	; However, since the APU registers are active (the 6502 address bus is within $4000 through $401F) the OAM DMA can read from the APU registers.
+	; Surprisingly, these registers have mirrors every $20 bytes. They just aren't normally accessible, as the 6502 address bus would typically be out of the $4000 through $401F range when trying to read these mirrors.
+	; However, with the APU registers active, the OAM DMA will be able to read from the APU registers and their mirrors.
+	; Here's the values that are expected to be put in OAM by this DMA.
+	; (The databus has the value $40 going into the DMA)
+	;
+	; 	   00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
+	; 	 ┌─────────────────────────────────────────────────┐
+	; 00 │ 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 │ ; The value of $40 is left over from the data bus.
+	; 10 │ 40 40 40 40 40 44 41 40 40 40 40 40 40 40 40 40 │ ; The $40's are the the left over data bus. The value of $44 is the frame interrupt flag + the triangle channel from reading address $4015 (APU Status).
+	; 20 │ 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 │ ; Referring to the above line, the $41 is open bus + reading controller 1, and $40 is open bus + controller 2. (this line is just open bus)
+	; 30 │ 40 40 40 40 40 04 01 00 00 00 00 00 00 00 00 00 │ ; This time, the frame interrupt flag is cleared, which clears bit 4 of open bus in future reads. The $01 is just controller 1. Controller 2 is still $00.
+	; 40 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │ ; All zeroes. Just open bus.
+	; 50 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │ ; Just the triangle playing with APU STATUS, and controller 1 being $01, which will never change. Controlelr 2 is still $00, and will never change.
+	; 60 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; 70 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
+	; 80 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; 90 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
+	; A0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; B0 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
+	; C0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; D0 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
+	; E0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; F0 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
+	; 	 └─────────────────────────────────────────────────┘
+
+	; Step 1: Set up the IRQ function
+	LDA #$68	;PLA
+	STA $600	; - PLA (Flags from BRK)
+	STA $601	; - PLA (Return address Low)
+	STA $602	; - PLA (Retirn Address High)
+	LDA #$60	;RTS
+	STA $603	; - RTS (to the JSR inside this test.)
+	; Step 2: Begin playing the triangle channel. (so APU Status isn't $00)
+	LDA #4
+	STA $4015	; enable the triangle channel
+	LDA #$F0
+	STA $400B
+	LDA #$FF
+	STA $4008
+	; Step 3: strobe controllers and read controller 1 eight times.
+	JSR ReadController1
+	; Controller 2 was also strobed, but never read.
+	; Step 4: Put $14 in the PPU read buffer.
+	JSR WaitForVBlank
+	JSR DisableRendering
+	JSR WriteToPPUADDRWithByte
+	.byte $24, $00
+	.byte $14, $FF
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
+	LDA $2007 ; Pre the buffer with the value of $14 written to PPU $2400
+	JSR ResetScroll
+	; Step 5: Put $8D in the PPU data bus.
+	LDA #$8D
+	STA $2002
+	; Step 6: Schedule a DMA
+	LDA #$40
+	JSR DMASyncWith40
+	; We have 50 CPU cycles until the DMA occurs.
+	; JSR takes 6 cycles, we want the DMA to occur 3 cycles after that. We need to stall for 41 CPU cycles
+	JSR Clockslide_41	; This takes 41 CPU cycles
+	JSR $3FFE	; Jump to $3FFE, as explained above.
+	; Making it back here is honestly an accomplishment. This should not crash, but I can't really prepare for incorrect emulation any more than I did in the above tests.
+	; If the wrong value remains on the data bus, then there's not much I can do about that. Hope you execute a BRK?
+	INC <currentSubTest
+	
+	;;; Test 5 [APU Register Activation]: The DMA can read from the APU registers when the CPU is executing out of page $40? ;;;
+	; Step 1: copy OAM to page 2.
+	LDX #0
+TEST_APURegActivation_Test5Loop:
+	LDA $2004
+	STA $2004 ; increment OAM Address.
+	STA $200,X
+	INX
+	BNE TEST_APURegActivation_Test5Loop
+	; Instead of making a 256 byte large look up table, I'm going to check each row individually. The result should match that table printed out above in the Test 4 description.
+	; X already equals zero.
+TEST_APURegActivation_Eval_0:		;
+	LDA $200,X						; Read the value copied from OAM
+	CMP #$40						; This row should be all $40's
+	BNE FAIL_APURegActivation		; If it's not $40, you fail
+	INX								; If it IS $40, check the next one.
+	CPX #$15						; Loop this through address $214
+	BNE TEST_APURegActivation_Eval_0;
+	LDA $200,X						; Read the value copied from OAM at $215
+	CMP #$44						; This should be 44
+	BNE FAIL_APURegActivation		; If it's not $44, you fail
+	INX								; Increment X for the next one.
+	LDA $200,X						; Read the value copied from OAM at $216
+	CMP #$41						; This should be 41
+	BNE FAIL_APURegActivation		; If it's not $41, you fail
+	INX								; Increment X for the next one.
+TEST_APURegActivation_Eval_1:		;
+	LDA $200,X						; Read the value copied from OAM
+	CMP #$40						; This row should be all $40's
+	BNE FAIL_APURegActivation		; If it's not $40, you fail
+	INX								; If it IS $40, check the next one.
+	CPX #$35						; Loop this through address $234
+	BNE TEST_APURegActivation_Eval_1;
+	; From here on out, it's a pattern of $04, $01, and $00 repeated $1E times
+	LDY #0
+TEST_APURegActivation_Eval_2:
+	CPY #2
+	BPL TEST_APURegActivation_Skip0401
+	LDA $200,X						; Read the value copied from OAM at $2_5
+	CMP #$04						; This should be 04
+	BNE FAIL_APURegActivation		; If it's not $04, you fail
+	INX								; Increment X for the next one.
+	LDA $200,X						; Read the value copied from OAM at $2_6
+	CMP #$01						; This should be 01
+	BNE FAIL_APURegActivation		; If it's not $01, you fail
+	INX								; Increment X for the next one.	
+	LDY #02							; It probably should have been INY's for neat-ness, but this saves 2 CPU cycles.
+TEST_APURegActivation_Skip0401:
+	LDA $200,X						; Read the value copied from OAM
+	CMP #$00						; This should be 00
+	BNE FAIL_APURegActivation		; If it's not $00, you fail
+	INY								; Increment Y for the next one.
+	CPY #$20
+	BNE TEST_APURegActivation_SkipResetY	; if Y=20, reset to 0, so we cna check for the "$04 $01"
+	LDY #0
+TEST_APURegActivation_SkipResetY:
+	INX								; Increment X for the next one.	
+	BNE TEST_APURegActivation_Eval_2
+	; Bravo!
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
 
 
+FAIL_APURegActivation:
+	LDA #$40
+	STA $4017
+	LDA #0
+	STA $4015
+	JMP TEST_Fail
 
 
 
@@ -6639,6 +6878,45 @@ VblSync_Plus_A_End: ; Moved here for space. This is the end of the VblSync_Plus_
 	RTS
 ;;;;;;;
 
+	.org $FE00
+	
+	; 17 $40's in a row.
+	.byte $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40
+	
+DMASyncWith40:
+	; This fuction very relaibly exits with exactly 50 CPU cycles until the DMA occurs.
+	; However, it relies on open bus behavior, with the consequence of an infinite loop if not correctly emulated.
+	STA <Copy_A
+	LDA #$4F ; loop, max speed.
+	STA $4010
+	LDA #0
+	STA $4011 ; minimum value of DMC
+	LDA #$F8
+	STA $4012 ; Sample address $FE00.
+	LDA #0
+	STA $4013 ; #1 * 16 + 1 = 17 byte length.
+	LDA #$14
+	STA $4015 ; Start the DMC DMA loop (with triangle playing)
+	NOP
+	NOP
+DMASync40_Loop:
+	LDA $5000 ; Open bus! Either we will read $40 from the high byte, or $00 from the DMA.
+	;	[Read AD] [Read 00] [Read 40] [DMA PUT (1)] [DMA GET (2)] [DMA PUT (3)] [DMA GET (4)] [Read open bus (5)]
+	CMP #$40
+	BNE DMASync40_Loop ; If the DMA occurs, BIT $5000 will read $40 (Setting overflow flag) ; +2 (7)
+	LDA #$0F ; don't loop, continue at max speed. +2 (9)
+	STA $4010 
+	LDA <$00  
+	LDA Copy_A
+	JSR Clockslide_100
+	JSR Clockslide_100
+	JSR Clockslide_100
+	JSR Clockslide_50
+	; Let's also set the triangle channel to play something, so the APU STATUS isn't #$00
+	NOP
+	CMP <$C9
+	RTS 
+	; so we have 50 cycles to go.
 	
 	.org $FE87
 	
@@ -6844,7 +7122,7 @@ TEST_DoesTheDMAUpdateOpenBus:
 	STA $4011 ; minimum value of DMC
 	LDA #$FF
 	STA $4012 ; Sample address $FFC0.
-	LDA #1
+	LDA #0
 	STA $4013 ; #1 * 16 + 1 = 17 byte length.
 	LDA #$10
 	STA $4015 ; Start the DMC DMA loop
