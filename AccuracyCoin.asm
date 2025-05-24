@@ -5296,7 +5296,7 @@ TEST_APURegActivation:
 	; This is possibly the most amazing test in this entire ROM.
 	;
 	; Here's the plan. (Special thanks to lidnariq and Fiskbit)
-	; Execute STA $4014 (A = $40) from address $3FFE. (The 6502 address bus will be $4000 when the OAM DMA occurs. Follow that up with a BRK from address $4001.)
+	; Execute STA $4014 (A = $40) from address $3FFE. (The 6502 address bus will be $4001 when the OAM DMA occurs. Follow that up with a BRK from address $4001.)
 	; In order to make this work, we need the PPU data bus to be $8D, the PPU Buffer to be $14, and Open Bus to be $40
 	; So, the order of operations here is: 
 	; Prepare PPU buffer with $14. (some writes to $2006, a write to $2007, more writes to $2006, and a read from $2007)
@@ -5315,19 +5315,18 @@ TEST_APURegActivation:
 	; Surprisingly, these registers have mirrors every $20 bytes. They just aren't normally accessible, as the 6502 address bus would typically be out of the $4000 through $401F range when trying to read these mirrors.
 	; However, with the APU registers active, the OAM DMA will be able to read from the APU registers and their mirrors.
 	; Here's the values that are expected to be put in OAM by this DMA.
-	; (The databus has the value $40 going into the DMA)
 	;
 	; 	   00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
 	; 	 ┌─────────────────────────────────────────────────┐
 	; 00 │ 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 │ ; The value of $40 is left over from the data bus.
-	; 10 │ 40 40 40 40 40 44 41 40 40 40 40 40 40 40 40 40 │ ; The $40's are the the left over data bus. The value of $44 is the frame interrupt flag + the triangle channel from reading address $4015 (APU Status).
+	; 10 │ 40 40 40 40 40 44 41 40 40 40 40 40 40 40 40 40 │ ; The $40's are the left over data bus. The value of $44 is the frame interrupt flag + the triangle channel from reading address $4015 (APU Status).
 	; 20 │ 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 │ ; Referring to the above line, the $41 is open bus + reading controller 1, and $40 is open bus + controller 2. (this line is just open bus)
 	; 30 │ 40 40 40 40 40 04 01 00 00 00 00 00 00 00 00 00 │ ; This time, the frame interrupt flag is cleared, which clears bit 4 of open bus in future reads. The $01 is just controller 1. Controller 2 is still $00.
 	; 40 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │ ; All zeroes. Just open bus.
-	; 50 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │ ; Just the triangle playing with APU STATUS, and controller 1 being $01, which will never change. Controlelr 2 is still $00, and will never change.
+	; 50 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │ ; Just the triangle playing with APU STATUS, and controller 1 being $01, which will never change. Controller 2 is still $00, and will never change.
 	; 60 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
-	; 70 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
-	; 80 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; 70 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │ ; Actually a correction about controller 2. If your DMA somehow reads the controller port extra times, this will eventually be $01, as will every open bus byte following it.
+	; 80 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │ ; If that does occur, you likely won't ecexute a BRK instruction on address $4001. It would likely be ORA <$01, X, which I could manipulate into an RTS!
 	; 90 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
 	; A0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
 	; B0 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
@@ -5341,9 +5340,12 @@ TEST_APURegActivation:
 	LDA #$68	;PLA
 	STA $600	; - PLA (Flags from BRK)
 	STA $601	; - PLA (Return address Low)
-	STA $602	; - PLA (Retirn Address High)
+	STA $602	; - PLA (Return Address High)
+	LDA #$A9	; LDA #Immediate
+	STA $603	; - LDA
+	STA $604	; - #$A9
 	LDA #$60	;RTS
-	STA $603	; - RTS (to the JSR inside this test.)
+	STA $605	; - RTS (to the JSR inside this test.)
 	; Step 2: Begin playing the triangle channel. (so APU Status isn't $00)
 	LDA #4
 	STA $4015	; enable the triangle channel
@@ -5367,7 +5369,12 @@ TEST_APURegActivation:
 	; Step 5: Put $8D in the PPU data bus.
 	LDA #$8D
 	STA $2002
-	; Step 6: Schedule a DMA
+	; Step 6: Try and prevent a crash with incorrect results of the test.
+	LDX #0 	 ; If (instead of BRK) you run: ORA <$01, X...
+	LDA #$60 ; This value of $60 will be put on the databus. an RTS instruction!
+	STA <$01 ; And since the BRK jumps to a function laoding the value of A with $A9, we can check for this after the test.
+	
+	; Step 7: Schedule a DMA
 	LDA #$40
 	JSR DMASyncWith40
 	; We have 50 CPU cycles until the DMA occurs.
@@ -5376,6 +5383,9 @@ TEST_APURegActivation:
 	JSR $3FFE	; Jump to $3FFE, as explained above.
 	; Making it back here is honestly an accomplishment. This should not crash, but I can't really prepare for incorrect emulation any more than I did in the above tests.
 	; If the wrong value remains on the data bus, then there's not much I can do about that. Hope you execute a BRK?
+	; And hey, if you didn't, I sure hope you executed an RTS. Speaking of, let's check for that magic number set by the LDA inside the BRK routine.
+	CMP #$A9
+	BNE FAIL_APURegActivation
 	INC <currentSubTest
 	
 	;;; Test 5 [APU Register Activation]: The DMA can read from the APU registers when the CPU is executing out of page $40? ;;;
