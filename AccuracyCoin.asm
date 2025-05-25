@@ -205,7 +205,9 @@ result_SprOverflow_Behavior = $459
 result_MisalignedOAM_Behavior = $45A
 result_Address2004_Behavior = $45B
 result_APURegActivation = $45C
-
+result_DMA_Plus_4015R = $45D
+result_DMA_Plus_4016R = $45E
+result_ControllerStrobing = $45F
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -524,10 +526,12 @@ Suite_CPUInterrupts:
 	
 	;; DMA Tests ;;
 Suite_DMATests:
-	.byte "DMA tests", $FF	
+	.byte "APU Registers and DMA tests", $FF	
 	table "DMA + $2007 Read", $FF, result_DMA_Plus_2007R, TEST_DMA_Plus_2007R
 	table "DMA + $2007 Write", $FF, result_DMA_Plus_2007W, TEST_DMA_Plus_2007W
-	table "DMA + $4016 Read", $FF, result_Unimplemented, DebugTest
+	table "DMA + $4015 Read", $FF, result_DMA_Plus_4015R, TEST_DMA_Plus_4015R
+	table "DMA + $4016 Read", $FF, result_DMA_Plus_4016R, TEST_DMA_Plus_4016R
+	table "Controller Strobing", $FF, result_ControllerStrobing, TEST_ControllerStrobing
 	table "DMC DMA + OAM DMA", $FF, result_Unimplemented, DebugTest
 	table "DMC DMA Implicit Stop", $FF, result_Unimplemented, DebugTest
 	table "DMC DMA Explicit Stop", $FF, result_Unimplemented, DebugTest
@@ -5291,7 +5295,7 @@ TEST_APURegActivation:
 	INC <currentSubTest
 
 	;;; Test 4 [APU Register Activation]: Can your emulator handle the wacky setup required to determine if the APU registers are active due to the 6502 address bus? (this could cause a crash) ;;;
-	; Oh- also don't press anything on controller 2 during this test. thanks.
+	; Oh- also don't press anything on controller 2 during this test. thanks. :)
 	;
 	; This is possibly the most amazing test in this entire ROM.
 	;
@@ -5302,7 +5306,7 @@ TEST_APURegActivation:
 	; Prepare PPU buffer with $14. (some writes to $2006, a write to $2007, more writes to $2006, and a read from $2007)
 	; Perpare PPU data bus with $8D. Write $8D to $2002.
 	; Now, when we execute this:
-	; [$3FFE = $8D] [$3FFF = $14] [DMC DMA! Overwrite databus with $40] [$4000 = $40]
+	; [$3FFE = $8D] [$3FFF = $14] [DMC DMA! Overwrite databus with $40] [$4000 = $40] [OAM DMA!]
 	; Which will result in an OAM DMA where the 6502 Databus is in-fact from the range $4000 to $401F, so the OAM DMA *will* read from all the registers.
 	; And then the final value of the databus will be $00, so the following instruction will be BRK.
 	;
@@ -5326,7 +5330,7 @@ TEST_APURegActivation:
 	; 50 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │ ; Just the triangle playing with APU STATUS, and controller 1 being $01, which will never change. Controller 2 is still $00, and will never change.
 	; 60 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
 	; 70 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │ ; Actually a correction about controller 2. If your DMA somehow reads the controller port extra times, this will eventually be $01, as will every open bus byte following it.
-	; 80 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │ ; If that does occur, you likely won't ecexute a BRK instruction on address $4001. It would likely be ORA <$01, X, which I could manipulate into an RTS!
+	; 80 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │ ; If that does occur, you likely won't execute a BRK instruction on address $4001. It would likely be ORA <$01, X, which I could use to manipulate the databus into an RTS!
 	; 90 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
 	; A0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
 	; B0 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
@@ -5441,7 +5445,7 @@ TEST_APURegActivation_Skip0401:
 	BNE FAIL_APURegActivation		; If it's not $00, you fail
 	INY								; Increment Y for the next one.
 	CPY #$20
-	BNE TEST_APURegActivation_SkipResetY	; if Y=20, reset to 0, so we cna check for the "$04 $01"
+	BNE TEST_APURegActivation_SkipResetY	; if Y=20, reset to 0, so we can check for the "$04 $01"
 	LDY #0
 TEST_APURegActivation_SkipResetY:
 	INX								; Increment X for the next one.	
@@ -5453,17 +5457,136 @@ TEST_APURegActivation_SkipResetY:
 	RTS
 ;;;;;;;
 
-
 FAIL_APURegActivation:
+FAIL_DMA_Timing:
 	LDA #$40
 	STA $4017
 	LDA #0
 	STA $4015
 	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
 
+TEST_DMA_Plus_4015R:
+	;;; Test 1 [DMA + $4015 Read]: Does the frame interrupt flag ever get set? ;;;
+	SEI
+	LDA #$00
+	STA $4017
+	JSR Clockslide_29780
+	JSR Clockslide_100
+	BIT $4015	; If the frame interrupt flag is set, bit 6 will be set. (set the overflow flag)
+	BVC FAIL_DMA_Timing
+	INC <currentSubTest
 
+	;;; Test 2 [DMA + $4015 Read]: Does the DMA happen at the right time? ;;;
+	JSR Clockslide_29780
+	JSR Clockslide_100
+	JSR DMASync_50CyclesRemaining
+	JSR Clockslide_47
+	BIT $4015	; If the frame interrupt flag is set, bit 6 will be set. (set the overflow flag) However, we time this DMA to also read this address, clearing the bit. (the overflow flag should be cleared after this BIT instruction)
+	BVS FAIL_DMA_Timing	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
 
+TEST_DMA_Plus_4016R:
+	;;; Test 1 [DMA + $4016 Read]: Does the DMA Update the read-sensitive controller port? (also doubles as a test for DMA timing) ;;;
+	
+	JSR DMASync_50CyclesRemaining
+	JSR Clockslide_35
+	LDA #1		; -2 = 48
+	STA $4016	; -4 = 44
+	LDA #0		; -2 = 42
+	STA $4016	; -4 = 38
+	LDA $4016 	; -3 = 35
+	LSR A
+	ROL <$50
+	LDX #7	; read from the controller port 7 more times.
+TEST_DMA_Plus_4016R_Loop:
+	LDA $4016
+	LSR A
+	ROL <$50
+	DEX
+	BNE TEST_DMA_Plus_4016R_Loop
+	; read the controller again for a "control group" (the player might still be holding A, or for some other reason, other buttons.
+	JSR ReadController1
+	LDA <controller
+	ASL A
+	ORA #1
+	CMP <$50
+	BNE FAIL_DMA_Plus_4016R
 
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_DMA_Plus_4016R:
+FAIL_ControllerStrobing:
+	JMP TEST_Fail
+	
+TEST_ControllerStrobing:
+	;;; Test 1 [Controller Strobing] The controller is only strobed if the value written to $4016 has a 1 in bit 0.
+	; This test only works if controller 1 is pressing either no buttons, or only A.
+		
+	LDA #2
+	STA $4016	; does not strobe the controller.
+	LDA #0
+	STA $4016
+	JSR ReadControllerInto50_and_A
+	AND #$7F
+	CMP #$7F
+	BNE FAIL_ControllerStrobing
+	INC <currentSubTest
+	
+	;;; Test 2 [Controller Strobing] The controller is only strobed if the value written to $4016 has a 1 in bit 0. (continued)
+	LDA #3
+	STA $4016 ; does strobe the controller.
+	LDA #0
+	STA $4016
+	JSR ReadControllerInto50_and_A
+	AND #$7F
+	BNE FAIL_ControllerStrobing	; the result should be $00
+	INC <currentSubTest
+
+	;;; Test 3 [Controller Strobing]: Do controller strobes only happen when the CPU transitions from a get cycle to a put cycle? ;;;
+	; This test will run DEC $4016
+	; cycle 1: read the opcode
+	; cycle 2: read the operand (low byte)
+	; cycle 3: read the operand (high byte)
+	; cycle 4: read from address $4016 ($41)
+	; cycle 5: write ($41) to $4016, then DEC to ($40)
+	; cycle 6: write ($40) to $4016
+	;
+	; This results in a 1-cycle strobe of the controller ports, and if that 1-cycle strobe happens on a get cycle, the controllers actually aren't strobed at all!
+	JSR WaitForVBlank
+	LDA #2
+	STA $4014 ; sync CPU with even cycle.
+	DEC $4016 ; this should strobe the controller.
+	JSR ReadControllerInto50_and_A
+	AND #$7F
+	BNE FAIL_ControllerStrobing	; the result should be $00
+	INC <currentSubTest
+
+	;;; Test 4 [Controller Strobing]: Do controller strobes only happen when the CPU transitions from a get cycle to a put cycle? (continued);;;
+	; This results in a 1-cycle strobe of the controller ports,however they actually aren't strobed at all!
+	JSR WaitForVBlank
+	LDA #2
+	STA $4014 ; sync CPU with even cycle.
+	LDA <$00	; 3 CPU cycles.
+	DEC $4016 ; this should strobe the controller.
+	JSR ReadControllerInto50_and_A
+	AND #$7F
+	CMP #$7F
+	BNE FAIL_ControllerStrobing	; the result should be $00
+	
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                ENGINE                   ;;
@@ -6537,6 +6660,18 @@ RC_Loop:
 	EOR <controller_New
 	AND <controller
 	STA <controller_New
+	RTS
+;;;;;;;
+
+ReadControllerInto50_and_A:	; Reads controller port 1 8 times, storing the result in address 50, and also the A register.
+	LDX #8
+ReadControllerInto50_Loop:
+	LDA $4016
+	LSR A
+	ROL <$50
+	DEX
+	BNE ReadControllerInto50_Loop
+	LDA <$50
 	RTS
 ;;;;;;;
 
