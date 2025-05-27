@@ -64,6 +64,10 @@ Test_UnOp_CPS = $2F
 Test_UnOp_IndirectPointerLo = $30
 Test_UnOp_IndirectPointerHi = $31
 Test_UnOp_CycleDelayPostDMA = $32
+
+HighlightTextPrinted = $33
+AutomateTestSuite = $34
+
 PostDMACyclesUntilTestInstruction = 14
 
 
@@ -346,7 +350,8 @@ PostResetFlagTest:
 	LDA #High(Suite_CPUBehavior)
 	STA <suitePointer+1
 	JSR LoadSuiteMenu
-
+	JSR DrawPageNumber
+	JSR WaitForVBlank
 	JSR ResetScroll
 	JSR EnableRendering_BG
 	JSR EnableNMI
@@ -402,7 +407,6 @@ Suite_CPUBehavior:
 	table "PPU Register Open Bus",	 $FF, result_PPUOpenBus, TEST_PPU_Open_Bus
 	table "Dummy read cycles", 		 $FF, result_DummyReads, TEST_DummyReads
 	table "Dummy write cycles", 	 $FF, result_DummyWrites, TEST_DummyWrites
-	table "Instruction Timing", 	 $FF, result_InstructionTiming, TEST_InstructionTiming
 	table "Open Bus", 				 $FF, result_OpenBus, TEST_OpenBus
 	.byte $FF
 	
@@ -563,6 +567,7 @@ Suite_PPUBehavior:
 	table "NMI Suppression", $FF, result_NMI_Suppression, TEST_NMI_Suppression
 	table "NMI at VBlank end", $FF, result_NMI_VBL_End, TEST_NMI_VBL_End
 	table "NMI disabled at VBlank", $FF, result_NMI_Disabled_VBL_Start, TEST_NMI_Disabled_VBL_Start
+	table "Instruction Timing", 	 $FF, result_InstructionTiming, TEST_InstructionTiming
 	.byte $FF
 	
 	;; Sprite Zero Hits ;;
@@ -5872,7 +5877,7 @@ TEST_InstructionTimingRTS:
 	INC <currentSubTest
 	
 	;;; Test H [Instruction Timing]: Does PLP take 4 cycles? ;;;
-	PHA
+	PHP
 	JSR SyncTo1000CyclesUntilNMI
 	PLP
 	JSR $500 ; run timing test.
@@ -6125,6 +6130,10 @@ PTloop:
 	BEQ PTpostLoop
 	TAX
 	LDA AsciiToCHR, X ; convert from ascii to my 0123456789ABCDEFGHI... format
+	LDX <HighlightTextPrinted
+	BEQ PT_SkipHighlight
+	ORA #$80
+PT_SkipHighlight:
 	STA $2007
 	INY
 	BNE PTloop ; Branch always to the loop
@@ -6191,6 +6200,10 @@ PTCloop:
 	BEQ PTCpostLoop
 	TAX
 	LDA AsciiToCHR, X ; convert from ascii to my 0123456789ABCDEFGHI... format
+	LDX <HighlightTextPrinted
+	BEQ PTC_SkipHighlight
+	ORA #$80
+PTC_SkipHighlight:
 	STA $2007
 	INY
 	BNE PTCloop ; Branch always to the loop
@@ -6459,7 +6472,7 @@ FixRTS:	; Correct the return address so any stack modifications for other functi
 	RTS
 ;;;;;;;
 
-LoadSuiteMenu: ; Print a list of tests to run. If these test shave been ran before, print the results too!
+LoadSuiteMenu: ; Print a list of tests to run. If these tests have been ran before, print the results too!
 	; assume the beginning of the suite is currently stored at suitePointer
 	; print the name of the suite.
 	; set up the PPU address to $2050
@@ -6475,7 +6488,8 @@ LoadSuiteMenu: ; Print a list of tests to run. If these test shave been ran befo
 	LDA <suitePointer+1
 	STA <$01
 	JSR PrintTextCentered
-	; set up the PPU address to $2096
+	
+	; set up the PPU address to $20A8
 	LDA #$20
 	STA <$03
 	LDA #$A8
@@ -6694,6 +6708,30 @@ HighlightLoop:
 	RTS
 ;;;;;;;
 
+HighlightPageNumber:	; Swaps the characters on the nametable from the unhighlighted varsion to the highlighted version, or vice versa. (flip bit 7)
+	JSR SetPPUADDRFromWord
+	.byte $20, $AA
+	LDA $2007
+	LDY #$00
+HighlightPageNumberLoop:
+	LDA $2007
+	STA $500,Y ; this will get cleared before any tests run, so I don't feel bad for using these bytes here,
+	INY
+	CPY #$0C
+	BNE HighlightPageNumberLoop
+	JSR SetPPUADDRFromWord
+	.byte $20, $AA
+	LDY #$00
+HighlightPageTextLoop:
+	LDA $500,Y ; this will get cleared before any tests run, so I don't feel bad for using these bytes here,
+	EOR #$80
+	STA $2007
+	INY
+	CPY #$0C
+	BNE HighlightPageTextLoop
+	RTS
+;;;;;;;
+
 GetVRegisterByXIndexForMenu: ; Sets up the PPU's "v" register to print the name of the test at the right position, based on index X into the suite.
 	; $20E1 + $40*X
 	; High = ((X+3) >> 2) + 20
@@ -6863,12 +6901,15 @@ NMI_Menu_NotMovingDown:
 	LDX <menuCursorYPos
 	BMI NMI_Menu_DontPokeTextAgain
 	JSR HighlightTest
-NMI_Menu_DontPokeTextAgain:
 NMI_Menu_NotMovingUp:
 	JMP ExitNMI
+NMI_Menu_DontPokeTextAgain:
+	JSR HighlightPageNumber	; highlight the "page xx of yy" text.
+	JMP ExitNMI
+	
 	;;;
 NMI_Menu_CursorAtTop
-	; cursor is at the top. if we press left or right, swamp in a different set
+	; cursor is at the top. if we press left or right, swap in a different set
 	LDA <controller_New
 	AND #$01 ; right
 	BEQ NMI_Menu_Top_NotPressingRight
@@ -6906,11 +6947,37 @@ NMI_Menu_Top_NotPressingLeft:
 	STA <menuCursorYPos
 	LDX #0
 	JSR HighlightTest
+	JSR HighlightPageNumber	; unhighlight it.
 NMI_Menu_Top_NotPressingDown:
-
+	; If we press A, let's run every test in the suite automatically!
+	LDA <controller_New
+	AND #$80 ; down
+	BEQ NMI_Menu_Top_NotPressingA
+	JSR AutomaticallyRunEveryTestInSuite
+NMI_Menu_Top_NotPressingA:
 ExitNMI:
 	JSR ResetScroll
 	RTI
+;;;;;;;
+
+AutomaticallyRunEveryTestInSuite:
+	LDA #1
+	STA <AutomateTestSuite
+	JSR DisableNMI
+	LDX #0
+AutomaticallyRunEveryTestLoop:
+	STX <menuCursorYPos
+	JSR RunTest
+	INX
+	CPX <menuHeight
+	BNE AutomaticallyRunEveryTestLoop
+	LDA #$FF
+	STA <menuCursorYPos
+	LDA #0
+	STA <AutomateTestSuite
+	JSR ResetScroll
+	JSR EnableNMI
+	RTS
 ;;;;;;;
 
 DrawNewSuiteTable:	; Draws and prepares the suite, menuTabXPos
@@ -6925,10 +6992,44 @@ DrawNewSuiteTable:	; Draws and prepares the suite, menuTabXPos
 	LDA TableTable+1,X
 	STA <suitePointer+1
 	JSR LoadSuiteMenu
+	
+	JSR DrawPageNumber
+	
 	; wait for vblank.
 	JSR WaitForVBlank	
 	JSR EnableRendering_BG
 	JSR EnableNMI
+	RTS
+;;;;;;;
+
+DrawPageNumber: ; Print "page xx / yy" at the top of the suite.	
+	LDA #1
+	STA <HighlightTextPrinted
+	LDA #00
+	STA <dontSetPointer
+	JSR PrintText
+	.word $20AA
+	.byte "Page xx / yy", $FF
+	JSR SetPPUADDRFromWord
+	.byte $20, $AF
+	LDA <menuTabXPos
+	CLC
+	ADC #1
+	CMP #$0A
+	BPL DNST_DontAdjustV
+	LDA #$A4
+	STA $2007
+	LDA <menuTabXPos
+	CLC
+	ADC #1
+DNST_DontAdjustV:
+	JSR PrintByteDecimal_MinDigits
+	JSR SetPPUADDRFromWord
+	.byte $20, $B4
+	LDA #((EndTableTable - TableTable)/2)
+	JSR PrintByteDecimal_MinDigits
+	LDA #0
+	STA <HighlightTextPrinted
 	RTS
 ;;;;;;;
 	
@@ -7045,7 +7146,10 @@ RunTest:
 	LDX <menuCursorYPos		      ; load X for the upcoming subroutines.
 	JSR DrawTEST			      ; draw "PASS" or "FAIL x"
 	JSR UpdateTESTAttributes      ; and update the colors for that text.
+	LDA <AutomateTestSuite
+	BNE RunTest_SkipHighlightResult
 	JSR HighlightTest		      ; and also highlight it, as the cursor is still there.
+RunTest_SkipHighlightResult:
 	JSR SetUpNMIRoutineForMainMenu; Recreate the NMI routine JMP, since some tests need their own NMI routine.
 	JSR EnableNMI			      ; With the test over, re-enable the NMI
 	JSR EnableRendering_BG	      ; and enable rendering too. This should still occur during Vblank.
@@ -7093,9 +7197,113 @@ PrintByte:	; Takes the A register and prints each nybble seperately as two chara
 	LSR A
 	LSR A
 	LSR A
+	LDX <HighlightTextPrinted
+	BEQ PB_SkipHighlight
+	ORA #$80
+PB_SkipHighlight:
 	STA $2007
 	PLA
 	AND #$0F
+	LDX <HighlightTextPrinted
+	BEQ PB_SkipHighlight1
+	ORA #$80
+PB_SkipHighlight1:
+	STA $2007
+	PLA
+	RTS
+;;;;;;;
+
+PrintByteDecimal:	; Takes the A register and prints a decimal representation of that value on the nametable at the current "v" address.
+	; This doesn't make any stack shenanigans.
+	PHA
+	LDX #$FF
+PBD_HundredsLoop:
+	; Calculate the hundreds digit in decimal.
+	INX
+	SEC
+	SBC #100
+	BCS PBD_HundredsLoop
+	; we underflowed. add 100 back.
+	ADC #100
+	PHA
+	TXA
+	LDX <HighlightTextPrinted
+	BEQ PBD_SkipHighlightHundreds
+	ORA #$80
+PBD_SkipHighlightHundreds:
+	STA $2007
+	PLA
+	LDX #$FF
+PBD_TensLoop:
+	; Calculate the hundreds digit in decimal.
+	INX
+	SEC
+	SBC #10
+	BCS PBD_TensLoop
+	; we underflowed. add 10 back.
+	ADC #10
+	PHA
+	TXA
+	LDX <HighlightTextPrinted
+	BEQ PBD_SkipHighlightTens
+	ORA #$80
+PBD_SkipHighlightTens:
+	STA $2007
+	PLA
+	LDX <HighlightTextPrinted
+	BEQ PBD_SkipHighlightOnes
+	ORA #$80
+PBD_SkipHighlightOnes:
+	STA $2007
+	PLA
+	RTS
+;;;;;;;
+
+PrintByteDecimal_MinDigits:	; Takes the A register and prints a decimal representation of that value on the nametable at the current "v" address. Removes trailing zeroes.
+	; This doesn't make any stack shenanigans.
+	PHA
+	LDX #$FF
+PBDMD_HundredsLoop:
+	; Calculate the hundreds digit in decimal.
+	INX
+	SEC
+	SBC #100
+	BCS PBDMD_HundredsLoop
+	; we underflowed. add 100 back.
+	ADC #100
+	PHA
+	TXA
+	BEQ PBDMD_SkipHundredsDigit
+	LDX <HighlightTextPrinted
+	BEQ PBDMD_SkipHighlightHundreds
+	ORA #$80
+PBDMD_SkipHighlightHundreds:
+	STA $2007
+PBDMD_SkipHundredsDigit:
+	PLA
+	LDX #$FF
+PBDMD_TensLoop:
+	; Calculate the hundreds digit in decimal.
+	INX
+	SEC
+	SBC #10
+	BCS PBDMD_TensLoop
+	; we underflowed. add 10 back.
+	ADC #10
+	PHA
+	TXA
+	BEQ PBDMD_SkipTensDigit
+	LDX <HighlightTextPrinted
+	BEQ PBDMD_SkipHighlightTens
+	ORA #$80
+PBDMD_SkipHighlightTens:
+	STA $2007
+PBDMD_SkipTensDigit:
+	PLA
+	LDX <HighlightTextPrinted
+	BEQ PBDMD_SkipHighlightOnes
+	ORA #$80
+PBDMD_SkipHighlightOnes:
 	STA $2007
 	PLA
 	RTS
