@@ -68,6 +68,8 @@ PostDMACyclesUntilTestInstruction = 14
 
 
 Test_ZeroPageReserved = $50 ; through $5F
+Test_ZeroPageReserved2 = $60 ; through $6F (rarely used, but let's still avoid putting engine stuff here.)
+
 
 TESTHighlightTextCopy = $7A
 
@@ -208,6 +210,8 @@ result_APURegActivation = $45C
 result_DMA_Plus_4015R = $45D
 result_DMA_Plus_4016R = $45E
 result_ControllerStrobing = $45F
+
+result_InstructionTiming = $460
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -398,6 +402,7 @@ Suite_CPUBehavior:
 	table "PPU Register Open Bus",	 $FF, result_PPUOpenBus, TEST_PPU_Open_Bus
 	table "Dummy read cycles", 		 $FF, result_DummyReads, TEST_DummyReads
 	table "Dummy write cycles", 	 $FF, result_DummyWrites, TEST_DummyWrites
+	table "Instruction Timing", 	 $FF, result_InstructionTiming, TEST_InstructionTiming
 	table "Open Bus", 				 $FF, result_OpenBus, TEST_OpenBus
 	.byte $FF
 	
@@ -729,9 +734,16 @@ TEST_OpenBus:
 	JSR PrintCHR
 	.word $2400
 	.byte $F0, $FF
-	JSR PrintCHR
-	.word $2400
-	.byte $FF	
+	BEQ TEST_OpenBus_ContinueTest4 ; Skip to TEST_OpenBus_ContinueTest4
+	;; If you are reading this for test 4, just ignore these next few lines. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+TEST_OpenBusA0A0:              ; This is a fail-safe for test 8. It needed to be at address $A0A0.	         ;;
+	SEI						   ; The RTI instruction pulled off some junk and we need to re-set the i flag.  ;;
+	LDX #1                     ; X=1, which is used to tell test 8 that it failed.                           ;;
+	JMP TEST_OpenBus_PostTest8 ; Jump to the end of test 8.                                                  ;;
+TEST_OpenBus_ContinueTest4:    ; Anyway, that was the greatest crime against programming I've ever commited. ;;
+	;; And now, back to your regularly scheduled program. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
 	LDA $2007 ; empty PPU buffer
 	LDA $3FFF, X ; dummy read $2007
 	PHA
@@ -739,7 +751,7 @@ TEST_OpenBus:
 	PLA
 	AND #$E0
 	CMP #$E0 ; However, in this case, the open bus bits are all set.
-	BNE TEST_Fail
+	BNE TEST_Fail2
 	INC <currentSubTest
 	
 	;;; Test 5 [Open Bus]: The databus actually exists, and the open bus behavior isn't being faked. ;;;
@@ -790,14 +802,6 @@ TEST_OpenBus_PrepIRQLoop:
 	LDA #0
 	STA $2002
 	LDX #$16
-	JMP TEST_OpenBus_ContinueTest6 ; Skip to TEST_OpenBus_ContinueTest6
-	;; If you are reading this for test 6, just ignore these next few lines. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-TEST_OpenBusA0A0:              ; This is a fail-safe for test 8. It needed to be at address $A0A0.	         ;;
-	SEI						   ; The RTI instruction pulled off some junk and we need to re-set the i flag.  ;;
-	LDX #1                     ; X=1, which is used to tell test 8 that it failed.                           ;;
-	JMP TEST_OpenBus_PostTest8 ; Jump to the end of test 8.                                                  ;;
-TEST_OpenBus_ContinueTest6:    ; Anyway, that was the greatest crime against programming I've ever commited. ;;
-	;; And now, back to your regularly scheduled program. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	; let's run the test.
 	LDA $3FFF,X 
 	AND #$20 ; Let's only check bit 5, since that's the open bus bit of address $4015
@@ -868,6 +872,7 @@ TEST_OpenBus_PostTest8:
 	TXA ; X = 0 if we ran RTS, X = 1 if we ran RTI.
 	CPX #$01
 	BEQ TEST_Fail2	
+	
 	;; END OF TEST ;;	
 TEST_Pass2:
 	LDA #1
@@ -3935,8 +3940,8 @@ TEST_NMI_Timing_Loop:
 	; Here's how this test works.
 	; The NMI stores the value of Y somewhere.
 	; Here's a series of INY isntructions. The NMI will happen in the middle of these.
-	JSR EnableNMI ; This takes 30 cycles.
-	JSR Clockslide_49; NMI should be in 1 cycle.	
+	JSR EnableNMI ; This takes 31 cycles.
+	JSR Clockslide_49; NMI should be in 0 cycles.	
 	INY
 	INY
 	INY
@@ -3988,8 +3993,8 @@ TEST_NMI_Suppression_Loop:
 	JSR VblSync_Plus_A
 	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
 	JSR Clockslide_29700 ; stall until 80 CPU cycles until Vblank
-	JSR EnableNMI ; This takes 30 cycles.
-	JSR Clockslide_45; NMI should be in 1 cycle.	
+	JSR EnableNMI ; This takes 31 cycles.
+	JSR Clockslide_45; NMI should be in 0 cycle.	
 	LDA $2002
 	ASL A ; Put VBlank flag in Carry
 	TYA	; transfer Y to A (Y = 1 if the NMI happened)
@@ -4043,7 +4048,7 @@ TEST_NMI_VBL_End_Loop:
 	; Vblank ends in about 2273.333 CPU cycles.
 	; So let's stall for 2200 cycles.
 	JSR Clockslide_2252
-	JSR EnableNMI	; NMI enable in 22 cycles.
+	JSR EnableNMI	; NMI enable in 21 cycles.
 	TYA
 	STA <$50,X	; store in $50,X	
 	JSR DisableNMI
@@ -4078,9 +4083,9 @@ TEST_NMI_Disabled_VBL_Start_Loop:
 	JSR VblSync_Plus_A
 	; This next CPU cycle is synced with PPU cycle 0+A for this frame.
 	JSR Clockslide_29700 ; NMI in ~80 cycles
-	JSR EnableNMI ; this takes 30 cycles
+	JSR EnableNMI ; this takes 31 cycles
 	JSR Clockslide_29	
-	JSR DisableNMI	; NMI disabled in 22 cycles.
+	JSR DisableNMI	; NMI disabled in 21 cycles.
 	TYA
 	STA <$50,X	; store in $50,X	
 	INX	
@@ -5109,10 +5114,10 @@ TEST_Address2004_Behavior:
 	
 	;;; Test 2 [Address $2004 behavior]: Reads from $2004 give you a value in OAM, but do not increment the OAM address ;;;
 	JSR ClearPage2
-	LDA #$5A
-	STA $200
-	LDA #$A5
-	STA $201
+	LDA #$5A			; OAM address $00 will have the value $5A.
+	STA $200			;
+	LDA #$A5			; and OAM address $01 will have the value $A5.
+	STA $201			;
 	JSR WaitForVBlank
 	LDA #2
 	STA $4014 ; run the OAM DMA with page 2.
@@ -5124,11 +5129,31 @@ TEST_Address2004_Behavior:
 	BNE FAIL_Address2004_Behavior	; The OAM Address didn't increment, so the value will still be $5A.
 	INC <currentSubTest
 	
-	;;; Test 3 [Address $2004 behavior]: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering enabled) will always read $FF ;;;
+	;;; Test 3 [Address $2004 behavior]: Reads from the attribute bytes are missing bits 2 through 5 ;;;
+	; If OAM is misaligned, it wouldn't be the attribute bytes in that case.
+	; Specifically, address n+2, where "n" is a multiple of 4, is missing bits.
+	; So, address $02, $06, $0A, $0E, $12, $16... and so on.
+	JSR ClearPage2
 	JSR WaitForVBlank
-	LDA #02
-	STA $4014
+	LDA #2
+	STA $4014 ; run the OAM DMA with page 2.
+	; OAM should be all $FFs, except the attribute addresses, which should be $E3.
+	STA $2004 ; INC OAM address to $01
+	STA $2004 ; INC OAM address to $02
+	LDA $2004
+	CMP #$E3
+	BNE FAIL_Address2004_Behavior1	; You should read the value $E8
+	INC <currentSubTest
+	
+	;;; Test 4 [Address $2004 behavior]: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering enabled) will always read $FF ;;;
+	JSR ClearPage2
+	LDA #$5A			; OAM address $00 will have the value $5A.
+	STA $200			;
+	LDA #$A5			; and OAM address $01 will have the value $A5.
+	STA $201			;
+	JSR WaitForVBlank
 	JSR DisableRendering
+	LDX #0
 	LDA #0
 	JSR VblSync_Plus_A
 	; Sync to dot 0 of vblank
@@ -5144,10 +5169,8 @@ TEST_Address2004_Behavior:
 	BNE FAIL_Address2004_Behavior1	; Despite OAM Address $00 being $5A, the PPU is busy clearing Secondary-OAM to $FF, so this will read $FF.
 	INC <currentSubTest
 	
-	;;; Test 4 [Address $2004 behavior]: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering disabled) does a regular read of $2004 ;;;
+	;;; Test 5 [Address $2004 behavior]: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering disabled) does a regular read of $2004 ;;;
 	JSR WaitForVBlank
-	LDA #02
-	STA $4014
 	JSR DisableRendering
 	LDA #0
 	JSR VblSync_Plus_A
@@ -5163,13 +5186,16 @@ TEST_Address2004_Behavior:
 	CMP #$5A
 	BNE FAIL_Address2004_Behavior1	; Despite being between cycle 1 and 64 of a visible scanline, since rendering is disabled, it reads $5A.
 	INC <currentSubTest
+	BNE TEST_Address2004_Behavior_Continue ; brnach alaways around the fail case.
 	
-	;;; Test 5 [Address $2004 behavior]: Writing to $2004 on a visible scanline increments the OAM address by 4 ;;;
+FAIL_Address2004_Behavior1:
+	JMP FAIL_Address2004
+
+TEST_Address2004_Behavior_Continue:
+	;;; Test 6 [Address $2004 behavior]: Writing to $2004 on a visible scanline increments the OAM address by 4 ;;;
 	LDA #$8C
 	STA $204
 	JSR WaitForVBlank
-	LDA #02
-	STA $4014
 	JSR DisableRendering
 	LDA #0
 	JSR VblSync_Plus_A
@@ -5178,20 +5204,19 @@ TEST_Address2004_Behavior:
 	STA $4014
 	JSR EnableRendering
 	JSR Clockslide_1816
-	; we have about 59 PPU cycles until dot 0 of scanline 0
 	NOP			;+6
 	NOP			;+6
 	NOP			;+6
-	NOP			;+6
+	LDA <$00	;+9	(This was originally a NOP, +6 cycles, but if your $2004 instruction doesn't have a delay of a few PPU cycles, then you would fail this test here, and that's not what this test is testing for.)
 	LDA #0		;+6
-	STA $2004	;+9 before write (+3 after). write with 20 ppu cycles until dot 0.
+	STA $2004	;+9 before write (+3 after). write with 20 ppu cycles until dot 0. (the CPU write occurs on dot 321 of the pre-render line)
 	STA $2001   ;+9 before write, disable rendering with 8 ppu cycles before dot 0.
 	LDA $2004
 	CMP #$8C
 	BNE FAIL_Address2004_Behavior1	; Despite being between cycle 1 and 64 of a visible scanline, since rendering is disabled, it reads $5A.
 	INC <currentSubTest
 
-	;;; Test 6 [Address $2004 behavior]: Writing to $2004 on a visible scanline doesn't write to OAM ;;;
+	;;; Test 7 [Address $2004 behavior]: Writing to $2004 on a visible scanline doesn't write to OAM ;;;
 	; leeching off the results of the previous test...
 	; PPUOAMAddress is currently 4
 	LDX #4
@@ -5204,6 +5229,30 @@ TEST_Address2004_Behavior_Loop:
 	LDA $2004
 	CMP #$5A
 	BNE FAIL_Address2004_Behavior1
+	INC <currentSubTest
+
+	;;; Test 8 [Address $2004 behavior]: Reads from $2004 during PPU cycle 65 to 256 of a visible scanline (with rendering enabled) reads from the current OAM address, which is changing every other ppu cycle.;;;
+	JSR WaitForVBlank
+	JSR DisableRendering
+TEST_Address2004_Behavior_loop:			; Set up page 2 so every value is essentially the index into OAM
+	TXA									; (As mentioned in test 3, the attribute bytes will be missing a few bits, but that's fine.)
+	STA $200, X							; We're going to read from OAM in the middle of evaluation to see where the OAM address is.
+	INX									;
+	BNE TEST_Address2004_Behavior_loop	;
+	LDA #0
+	JSR VblSync_Plus_A
+	; Sync to dot 0 of vblank
+	LDA #02
+	STA $4014
+	JSR EnableRendering
+	JSR Clockslide_1830
+	; we have about 17 PPU cycles until dot 0 of scanline 0
+	; Let's aim for about dot 130. (130 + 17 = 147. 147/3 = 49 CPU cycles. (-3 more since the read happens after 3 more CPU cycles)
+	JSR Clockslide_46
+	LDA $2004
+	BEQ FAIL_Address2004_Behavior1	; It definitely shouldn't be $00.
+	CMP #$FF
+	BEQ FAIL_Address2004_Behavior1	; Since it's inconsistent between CPU/PPU clock alignments, (and probably different on different consolre revisions) we'll simply just check that it isn't FF.
 
 	;; END OF TEST ;;
 	JSR WaitForVBlank
@@ -5212,9 +5261,7 @@ TEST_Address2004_Behavior_Loop:
 	RTS
 ;;;;;;;
 
-FAIL_Address2004_Behavior1:
-	JMP FAIL_Address2004
-;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 FAIL_APURegActivation_Pre:
 	LDA #1
@@ -5569,7 +5616,7 @@ TEST_ControllerStrobing:
 	BNE FAIL_ControllerStrobing	; the result should be $00
 	INC <currentSubTest
 
-	;;; Test 4 [Controller Strobing]: Do controller strobes only happen when the CPU transitions from a get cycle to a put cycle? (continued);;;
+	;;; Test 4 [Controller Strobing]: Do controller strobes only happen when the CPU transitions from a get cycle to a put cycle? (continued) ;;;
 	; This results in a 1-cycle strobe of the controller ports,however they actually aren't strobed at all!
 	JSR WaitForVBlank
 	LDA #2
@@ -5581,11 +5628,267 @@ TEST_ControllerStrobing:
 	CMP #$7F
 	BNE FAIL_ControllerStrobing	; the result should be $00
 	
-	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
 ;;;;;;;
+
+FAIL_InstructionTiming:
+	JMP TEST_Fail
+
+TEST_InstructionTiming:
+	;;; Test 1 [Instruction Timing]: Is the NMI Timing Reliable enough for this test? ;;;
+	; How this test works:
+	; The test will begin exactly 1000 CPU cycles before the NMI occurs.
+	; The results can be found in a 16-bit value (little endian) at address $0060
+	; The result there is the total number of CPU cycles the test spent before jumping to JSR $500
+	;
+	; The actual way this works is:
+	; Address $500 through $6FE are filled with NOP instructions.
+	; The NMI will occur somewhere while executing all of those NOPs, and it will push the return address to the stack.
+	; By waiting one more frame, we can determine if we were on cycle 1 or 2 of a NOP instruction when the NMI occured, giving us precisely the number of CPU cycles that occured in this test.
+	; Then some math happens, storing the result in $60
+	;
+	; Now, we would really like to run this test even if your NMI timing is bad.
+	; So let's run a "callibration test"
+	JSR SyncTo1000CyclesUntilNMI
+	JSR $500	; wait for NMI, which records the return address, then jumps to ConvertReturnAddressIntoCPUCycles
+	; The results stored in $60 and $61 *should* be zero, but some emulators might fail this, due to incorrect NMI timing.
+	; Basically, we take this value (which should be zero) and use that as the "overhead" in future tests.
+	; So if the value was 04, indicating that the NMI happened 4 cycles later than expected, we subtract 4 from all of the future tests.
+	LDA <$60	; Copy the high byte of the results
+	STA <$62	; Paste to the high byte of the overhead
+	LDA <$61	; Copy the low byte of the results
+	STA <$63	; Paste to the low byte of the overhead.
+	; Let's run it again!
+	JSR SyncTo1000CyclesUntilNMI
+	JSR $500	
+	LDA <$60
+	BNE FAIL_InstructionTiming ; this should be zero.
+	LDA <$61
+	BNE FAIL_InstructionTiming ; this should also be zero.
+	; Test 1 continued:
+	JSR SyncTo1000CyclesUntilNMI
+	JSR Clockslide_500	; wait exactly 500 CPU cycles.
+	JSR $500	; wait for NMI, which records the return address, then jumps to ConvertReturnAddressIntoCPUCycles
+	; Decimal 500 = $1F4
+	LDA <$60
+	CMP #$01
+	BNE FAIL_InstructionTiming ; this should be $01.
+	LDA <$61
+	CMP #$F4
+	BNE FAIL_InstructionTiming ; this should be $F4.
+	; Alright, I think this emulator has reliable enough NMI timing for this.
+	; Granted, if any of the instructions needed to sync this up perfectly was failing, then this likely wouldn't even get this far.
+	; Oh well? Let's check how long some instructions take!
+	INC <currentSubTest
+	
+	;;; Test 2 [Instruction Timing]: Does LDA #Immediate take 2 cycles? ;;;
+	JSR SyncTo1000CyclesUntilNMI
+	LDA #$5A ; this takes 2 cycles.
+	JSR $500 ; run timing test.
+	LDA #02 
+	CMP <$61
+	BNE FAIL_InstructionTiming ; this should be $02.
+	INC <currentSubTest
+
+	;;; Test 3 [Instruction Timing]: Does LDA <ZeroPage take 3 cycles? ;;;
+	JSR SyncTo1000CyclesUntilNMI
+	LDA <$00 ; this takes 3 cycles.
+	JSR $500 ; run timing test.
+	LDA #03 
+	CMP <$61
+	BNE FAIL_InstructionTiming ; this should be $03.
+	INC <currentSubTest
+	
+	;;; Test 4 [Instruction Timing]: Does LDA Absolute take 4 cycles? ;;;
+	JSR SyncTo1000CyclesUntilNMI
+	LDA $0000 ; this takes 4 cycles.
+	JSR $500 ; run timing test.
+	LDA #04 
+	CMP <$61
+	BNE FAIL_InstructionTiming ; this should be $04.
+	INC <currentSubTest
+	
+	;;; Test 5 [Instruction Timing]: Does LDA Absolute, X take 4 cycles if a page boundary is NOT crossed? ;;;
+	INC <currentSubTest
+	JSR SyncTo1000CyclesUntilNMI
+	LDX #02	  ; This take 2 cycles
+	LDA $0000, X ; this takes 4 cycles.
+	JSR $500 ; run timing test.
+	LDA #06 
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $06.(I also had to set X)
+	INC <currentSubTest
+	
+	;;; Test 6 [Instruction Timing]: Does LDA Absolute, X take 5 cycles if a page boundary IS crossed? ;;;
+	INC <currentSubTest
+	JSR SyncTo1000CyclesUntilNMI
+	LDX #02	  ; This take 2 cycles
+	LDA $00FF, X ; this takes 5 cycles.
+	JSR $500 ; run timing test.
+	LDA #07 
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $06.(I also had to set X)
+	INC <currentSubTest
+	
+	;;; Test 7 [Instruction Timing]: Does LDA (indirect),Y take 5 cycles if a page boundary is NOT crossed? ;;;
+	INC <currentSubTest
+	LDA #0
+	STA <Test_UnOp_IndirectPointerLo
+	STA <Test_UnOp_IndirectPointerHi
+	JSR SyncTo1000CyclesUntilNMI
+	LDY #02	  ; This take 2 cycles
+	LDA [Test_UnOp_IndirectPointerLo],Y ; this takes 5 cycles.
+	JSR $500 ; run timing test.
+	LDA #07 
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $07.(I also had to set Y)
+	INC <currentSubTest
+
+	;;; Test 8 [Instruction Timing]: Does LDA (indirect),Y take 6 cycles if a page boundary IS crossed? ;;;
+	INC <currentSubTest
+	LDA #$FF
+	STA <Test_UnOp_IndirectPointerLo
+	STA <Test_UnOp_IndirectPointerHi
+	JSR SyncTo1000CyclesUntilNMI
+	LDY #02	  ; This take 2 cycles
+	LDA [Test_UnOp_IndirectPointerLo],Y ; this takes 6 cycles.
+	JSR $500 ; run timing test.
+	LDA #08
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $08.(I also had to set Y)
+	INC <currentSubTest
+	
+	;;; Test 9 [Instruction Timing]: Does JMP take 3 cycles? ;;;
+	JSR SyncTo1000CyclesUntilNMI
+	JMP TEST_InstructionTimingContinue
+	; I thought it was clever to jump around the fail condition while testing how long a JMP instruction takes.
+	
+FAIL_InstructionTiming1:
+	JMP TEST_Fail
+
+TEST_InstructionTimingContinue:
+	JSR $500 ; run timing test.
+	LDA #03 
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $03.(I also had to set X)
+	INC <currentSubTest
+
+	;;; Test A [Instruction Timing]: Does LDA (indirect,X) take 6 cycles? ;;;
+	INC <currentSubTest
+	LDA #$FF
+	JSR SyncTo1000CyclesUntilNMI
+	LDX #$FF	  ; This take 2 cycles
+	LDA [Test_UnOp_IndirectPointerLo,X] ; this takes 6 cycles.
+	JSR $500 ; run timing test.
+	LDA #08
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $08.(I also had to set X)
+	INC <currentSubTest
+
+	;;; Test B [Instruction Timing]: Do these implied/accumulator instructions each take 2 cycles?  ;;;
+	; I guess in theory, you could have an emulator that for some reason makes one of these take 3 cycles, and another take 1 and it would all add up, but that would be dumb.
+	; In any case, if you are failing this one, apologies for not narrowing down exactly which one is failing.
+	; This test takes a long time to run due to all the syncing with vblank, and I'd like to keep the run duration down.
+	JSR SyncTo1000CyclesUntilNMI
+	ASL A
+	ROL A
+	LSR A
+	ROR A
+	TSX
+	TXS
+	TAX
+	DEX
+	NOP
+	JSR $500 ; run timing test.
+	LDA #$12 
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $12.
+	INC <currentSubTest
+	
+	;;; Test C [Instruction Timing]: Does JSR take 6 cycles?  ;;;
+	JSR SyncTo1000CyclesUntilNMI
+	JSR TEST_InstructionTimingJSR
+TEST_InstructionTimingJSR:
+	JSR $500 ; run timing test.
+	PLA	; fix the stack
+	PLA	; fix the stack
+	LDA #$06 
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $06.
+	INC <currentSubTest
+	
+	;;; Test D [Instruction Timing]: Does RTS take 6 cycles?  ;;;
+	LDA #LOW(TEST_InstructionTimingRTS)
+	SEC
+	SBC #1
+	LDA #HIGH(TEST_InstructionTimingRTS)
+	SBC #0
+	PHA
+	LDA #LOW(TEST_InstructionTimingRTS)
+	SEC
+	SBC #1
+	PHA
+	JSR SyncTo1000CyclesUntilNMI
+	RTS
+TEST_InstructionTimingRTS:
+	JSR $500 ; run timing test.
+	PLA	; fix the stack
+	PLA	; fix the stack
+	LDA #$06 
+	CMP <$61
+	BNE FAIL_InstructionTiming1 ; this should be $06.
+	INC <currentSubTest
+
+	;;; Test E [Instruction Timing]: Does PHA take 3 cycles? ;;;
+	JSR SyncTo1000CyclesUntilNMI
+	PHA
+	JSR $500 ; run timing test.
+	PLA
+	LDA #03 
+	CMP <$61
+	BNE FAIL_InstructionTiming2 ; this should be $03.
+	INC <currentSubTest
+	
+	;;; Test F [Instruction Timing]: Does PLA take 4 cycles? ;;;
+	PHA
+	JSR SyncTo1000CyclesUntilNMI
+	PLA
+	JSR $500 ; run timing test.
+	LDA #04 
+	CMP <$61
+	BNE FAIL_InstructionTiming2 ; this should be $04.
+	INC <currentSubTest
+
+	;;; Test G [Instruction Timing]: Does PHP take 3 cycles? ;;;
+	JSR SyncTo1000CyclesUntilNMI
+	PHP
+	JSR $500 ; run timing test.
+	PLA
+	LDA #03 
+	CMP <$61
+	BNE FAIL_InstructionTiming2 ; this should be $03.
+	INC <currentSubTest
+	
+	;;; Test H [Instruction Timing]: Does PLP take 4 cycles? ;;;
+	PHA
+	JSR SyncTo1000CyclesUntilNMI
+	PLP
+	JSR $500 ; run timing test.
+	LDA #04 
+	CMP <$61
+	BNE FAIL_InstructionTiming2 ; this should be $04.
+	;TODO Add more instructions?
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_InstructionTiming2:
+	JMP TEST_Fail
+
 	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -5754,9 +6057,10 @@ ClearPage5Loop:
 	STA $700,X ; it also clears page 7. (The NMI vector points to $700, but the NMI routine is set up again at the end of any tests, so don't worry)
 	INX
 	BNE ClearPage5Loop
-	; let's also clear $50 - $5F on the zero page.
+	; let's also clear $50 - $6F on the zero page.
 ClearPage5ZPLoop:
 	STA <$50,X
+	STA <$60,X
 	INX
 	CPX #$10
 	BNE ClearPage5ZPLoop
@@ -6827,6 +7131,124 @@ DMASync_50MinusACyclesRemaining: ; Sync the CPU and the DMA, such that the DMA r
 	LDA <Test_UnOp_CycleDelayPostDMA ; 95 -> 92
 	JSR Clockslide36_Plus_A	; 92 -> (56-A)
 	RTS ; (56-A) -> (50-A) cycles after this RTS, a DMA will occur.
+;;;;;;;
+
+SyncTo1000CyclesUntilNMI:
+	PHA
+	LDA #$EA
+	LDX #0
+SyncTo1000CyclesUntilNMILoop:
+	STA $500,X
+	STA $600,X
+	INX
+	BNE SyncTo1000CyclesUntilNMILoop
+	LDA #$4C
+	STA $700
+	LDA #LOW(ConvertReturnAddressIntoCPUCycles)
+	STA $701
+	LDA #HIGH(ConvertReturnAddressIntoCPUCycles)
+	STA $702
+	LDA #$60
+	STA $6FF	; RTS at the end of page 6.
+	JSR DisableRendering
+	LDA #0
+	JSR VblSync_Plus_A
+	; We are now on dot 0 of Vblank
+	JSR Clockslide_3000 ;
+	JSR Clockslide_3000 ; 6000
+	JSR EnableNMI		; 6031 (wait for vblank to end first)
+	JSR Clockslide_3000 ; 9031
+	JSR Clockslide_3000 ; 12031
+	JSR Clockslide_3000 ; 15031
+	JSR Clockslide_3000 ; 18031
+	JSR Clockslide_3000 ; 21031
+	JSR Clockslide_3000 ; 24031
+	JSR Clockslide_3000 ; 27031
+	JSR Clockslide_500  ; 27531
+	JSR Clockslide_500  ; 28031
+	JSR Clockslide_500  ; 28531
+	JSR Clockslide_100  ; 28631
+	JSR Clockslide_100  ; 28731
+	JSR Clockslide_20   ; 28751
+	JSR Clockslide_21   ; 28772
+	PLA
+	RTS	;+6
+;;;;;;;
+
+ConvertReturnAddressIntoCPUCycles:
+	TSX
+	LDA $0103,X ; High byte of the return address
+	; The latest the NMI can happen is from address $06F2.
+	; Subtract 5 from the high byte.
+	SEC
+	SBC #$5
+	STA <$60	; A very rare use of address $60, which is reserved for non-engine test stuff.
+	LDA $0102,X ; Low byte of the return address.
+	CLC
+	ADC #$2		; add 2 (JSR takes 6 cycles, which would be equivilent to 3 NOPs. Then subtract 1 from 3, ( =2 ) since the NMI happens after the instruction ends.)
+	STA <$61	; Keep in mind, these LDA's only work if the stack pointer isn't 00, but that's not really a concern here.
+	LDA <$60	;
+	ADC #0		; Add the carry.
+	; Now, the total number of CPU cycles/2 is stored at $60.
+	; Issue: Since we're dividing by 2, we don't know if we're on an even or an odd cycle.
+	;
+	; start by multiplying by 2.
+	ASL A
+	STA <$60
+	ASL <$61
+	LDA <$60
+	ADC #0
+	STA <$60
+	; Okay, now we have the number of CPU cycles, &=$FFFE
+	; If this was an even cycle, add 0. If this was an odd cycle, add 1.
+	; We're pretty much just going to wait for the next NMI to determine this. LDX #1, and DEX. if the NMI happens before the DEX, then we add 1. Otherwise, add 0. 
+	LDA #Low(CRAICPUC_NMI)
+	STA $701
+	LDA #High(CRAICPUC_NMI)
+	STA $702
+	JSR Clockslide_29700
+	NOP			; +2
+	NOP			; +2
+	NOP
+	NOP
+	; Now we clockslide until there's either 2 or 3 cycles until the NMI.
+	LDX #0
+	; The NMI either happens here...
+	INX
+	; or here.
+	JSR DisableNMI
+	; At this point, the 16-bit number stored in $60 (little endian) is exactly 1000-TotalCyclesOfTheTest
+	; So all we need to do to calculate TotalCyclesOfTheTest is subtract the 16-bit word at $60 from 1000
+	SEC
+	LDA #LOW(1000)
+	SBC <$61
+	STA <$61
+	LDA #HIGH(1000)
+	SBC <$60
+	STA <$60	
+	; Subtract the overhead:
+	SEC
+	LDA <$61
+	SBC <$63
+	STA <$61
+	LDA <$60
+	SBC <$62
+	STA <$60	
+	
+	RTI	; returns to the test code.
+	
+CRAICPUC_NMI: ; Convert Return Address Into CPU Cycles NMI Routine
+	TXA
+	CLC
+	ADC <$61
+	STA <$61
+	LDA <$60
+	ADC <$60
+	RTI
+;;;;;;;
+
+
+
 
 	; A giant list of ClockSlides!
 	; "What's a clockslide?"
@@ -7001,6 +7423,32 @@ Clockslide_1816:	   ;=6
 	NOP				   ;=1810
 	RTS			       ;=1816
 ;;;;;;;
+
+Clockslide_28780:		;=6
+	JSR Clockslide_38 	;=44
+	JSR Clockslide_100	;=144
+	JSR Clockslide_100	;=244
+	JSR Clockslide_500	;=744
+	JSR Clockslide_500	;=1244
+	JSR Clockslide_500	;=1744
+	JSR Clockslide_500	;=2244
+	JSR Clockslide_500	;=2744
+	JSR Clockslide_500	;=3244
+	JSR Clockslide_500	;=3744
+	JSR Clockslide_500	;=4244
+	JSR Clockslide_500	;=4744
+	JSR Clockslide_3000	;=7744
+	JSR Clockslide_3000	;=10744
+	JSR Clockslide_3000	;=13744
+	JSR Clockslide_3000	;=16744
+	JSR Clockslide_3000	;=19744
+	JSR Clockslide_3000	;=22744
+	JSR Clockslide_3000	;=25744
+	JSR Clockslide_3000	;=28744
+	JSR Clockslide_30   ;=29774
+	RTS					;=29780
+;;;;;;;
+
 
 Clockslide36_Plus_A:;+6
 	STA <$00	; +3
