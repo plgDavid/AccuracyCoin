@@ -6037,26 +6037,31 @@ TEST_IFlagLatency:
 	LDA #$40
 	STA $4017	; disable the frame counter IRQ's
 
-	;;; Test 1 [Interrupt Flag Latency]: Does the IRQ happen at the correct cycle? ;;;
+	;;; Test 1 [Interrupt Flag Latency]: Does the IRQ happen at all? ;;;
 	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
-	CLI			; +2
+	LDA #$5A
 	; DMA should happen here.
-	INX 		; +2
+	STA <$50
+	JSR Clockslide_50 ; The timing of the IRQ Level detector is not what we are testing for here, so we'll stall for a bit. We *will* time for that in a few tests, but not right now.
+	CLI			; +2
+	NOP
 	; IRQ should happen here.
-	INX ; If this happens before the IRQ, you fail the test. (The following tests rely on accurate DMC DMA IRQ timing, so even if an emulator does have proper interrupt polling but inaccuracte DMA timing, it will fail here.)
-	LDA <$50
-	CMP #01
+	NOP
+	LDA <$50	; the IRQ routine will overwrite this value, so it should be $00 instead of $5A
+	CMP #00
 	BNE FAIL_IFlagLatency1
 	INC <currentSubTest
 
 	;;; Test 2 [Interrupt Flag Latency]: Does the IRQ happen immediately after CLI, or after the following instruction? ;;;
 	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
-	INX	; +2 (X=1)
-		; DMA should happen here.
-	CLI	; + 2
-		; The IRQ isn't detected until the end of the *next* instruction.
+	NOP
+	; DMA should happen here.
+	JSR Clockslide_50 ; Wait for IRQ to be ready
+	INX ; X=1
+	CLI
+	; The IRQ isn't detected until the end of the *next* instruction.
 	INX	; X=2
-		; IRQ should happen here.
+	; IRQ should happen here.
 	INX
 	LDA <$50
 	CMP #02
@@ -6065,11 +6070,13 @@ TEST_IFlagLatency:
 	
 	;;; Test 3 [Interrupt Flag Latency]: Does SEI immediately prevent the IRQ from happening? (it should not) ;;;
 	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
-	INX	; +2
-		; DMA should happen here.
-	CLI	; +2
-	SEI ; +2
-		; The interrupt has already been detected before the I flag was set, so the IRQ will happen here. (The IRQ is acknowledged so it doesn't happen twice in this test)
+	NOP
+	; DMA should happen here.
+	JSR Clockslide_50 ; Wait for IRQ to be ready
+	INX
+	CLI
+	SEI
+	; The interrupt has already been detected before the I flag was set, so the IRQ will happen here. (The IRQ is acknowledged so it doesn't happen twice/infinitely in this test)
 	INX
 	LDA <$50
 	CMP #01
@@ -6091,11 +6098,13 @@ TEST_IFlagLatency:
 	LDA #HIGH(TEST_IFlagLatency_IRQ2)	; change the IRQ pointer. This new one only acknowledges the IRQ the second time it occurs.
 	STA $602
 	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
-	CLI	; +2
-		; DMA should happen here.
-	INX ; +2
-		; IRQ should happen here.
-		; Second IRQ should happen here.
+	NOP
+	; DMA should happen here.
+	JSR Clockslide_50 ; Wait for IRQ to be ready
+	CLI
+	INX
+	; IRQ should happen here.
+	; Second IRQ should happen here.
 	INX ; If this happens before the IRQ, you fail the test.
 	SEI
 	LDA <$51 ; Did the IRQ run twice? (This uses the Y register, incremented in every IRQ, initialized to $FF, so $FF + 2 = 1. CMP #1.
@@ -6103,7 +6112,7 @@ TEST_IFlagLatency:
 	BNE FAIL_IFlagLatency1
 	LDA <$50 ; Did the second IRQ run before the second INX?
 	CMP #1
-	BNE FAIL_IFlagLatency1
+	BNE FAIL_IFlagLatency
 	INC <currentSubTest
 
 	;;; Test 6 [Interrupt Flag Latency]: RTI updates the I flag before the check for an interrupt ;;;
@@ -6116,8 +6125,10 @@ TEST_IFlagLatency:
 	LDA #flag_i ; the I flag is #$04
 	PHA
 	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
-	LDA #$5A
+	NOP
 	; DMA should happen here.
+	JSR Clockslide_50 ; Wait for IRQ to be ready
+	LDA #$5A
 	STA <$50 ; The IRQ routine would overwrite this. The IRQ should not occur in this test.
 	CLI
 	RTI	
@@ -6132,10 +6143,12 @@ TEST_IFlagLatency_RTI:
 
 	;;; Test 7 [Interrupt Flag Latency]: Does the IRQ happen immediately after PLP, or after the following instruction? ;;;
 	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
-	LDA #0
+	NOP
 	; DMA should happen here.
+	JSR Clockslide_50 ; Wait for IRQ to be ready
+	LDA #0
 	PLA
-	PLP	; Pull off the falgs. I flag is NOT set.
+	PLP	; Pull off the flags. I flag is NOT set.
 	INX
 	; IRQ should happen here.
 	INX ; If this happens before the IRQ, you fail the test.
@@ -6143,8 +6156,22 @@ TEST_IFlagLatency_RTI:
 	CMP #01
 	BNE FAIL_IFlagLatency
 	INC <currentSubTest
+	
+	;;; Test 8 [Interrupt Flag Latency]: Does the IRQ happen at the correct CPU cycle? ;;;
+	; In order to test the Interrupt polling behavior of branches, we need the IRQ to happen at the correct CPU cycle.
+	; Let's check if it does!
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	CLI			; +2
+	; DMA should happen here
+	INX
+	; IRQ should happen here.
+	INX
+	LDA <$50	; the IRQ routine will overwrite this value, so it should be $00 instead of $5A
+	CMP #01
+	BNE FAIL_IFlagLatency
+	INC <currentSubTest
 
-	;;; Test 8 [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 2? (They should) ;;;
+	;;; Test 9 [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 2? (They should) ;;;
 	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
 	LDA <$50
 	; DMA should happen here.
@@ -6160,7 +6187,7 @@ TEST_IFlagLatency_Branch1:
 	BNE FAIL_IFlagLatency
 	INC <currentSubTest
 	
-	;;; Test 9 [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 3? (They should not) ;;;
+	;;; Test A [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 3? (They should not) ;;;
 	JSR TEST_IFlagLatency_StartTest_10ExtraCycles ; clear address $50, and sync with DMA. X=0. We have 12 cycles until the DMA instead of the usual 2 these tests have used.
 	LDA #$5A ; +2 (10 cycles until DMA)
 	STA <$50 ; +3 (7 cycles until DMA)
@@ -7973,7 +8000,7 @@ VblSync_Plus_A_End: ; Moved here for space. This is the end of the VblSync_Plus_
 
 	.org $FDF3
 TEST_IFlagLatency_PageBoundaryTest:
-	;;; Test A [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 4? (They should) ;;;
+	;;; Test B [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 4? (They should) ;;;
 	JSR TEST_IFlagLatency_StartTest_10ExtraCycles ; clear address $50, and sync with DMA. X=0. We have 12 cycles until the DMA instead of the usual 2 these tests have used.
 	LDA #$5A ; +2 (10 cycles until DMA)
 	STA <$50 ; +3 (7 cycles until DMA)
