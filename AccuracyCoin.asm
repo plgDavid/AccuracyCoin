@@ -216,6 +216,8 @@ result_DMA_Plus_4016R = $45E
 result_ControllerStrobing = $45F
 
 result_InstructionTiming = $460
+result_IFlagLatency = $461
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -525,12 +527,11 @@ Suite_UnofficialOps_Immediates:
 	
 	;; CPU Interrupts ;;
 Suite_CPUInterrupts:
-	.byte "CPU Interrupts by Blargg", $FF
-	table "CLI Latency", $FF, result_Unimplemented, DebugTest
+	.byte "CPU Interrupts", $FF
+	table "Interrupt flag latency", $FF, result_IFlagLatency, TEST_IFlagLatency
 	table "NMI AND BRK", $FF, result_Unimplemented, DebugTest
 	table "NMI AND IRQ", $FF, result_Unimplemented, DebugTest
 	table "IRQ AND DMA", $FF, result_Unimplemented, DebugTest
-	table "Branch delays IRQ", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
 	;; DMA Tests ;;
@@ -5893,7 +5894,298 @@ TEST_InstructionTimingRTS:
 
 FAIL_InstructionTiming2:
 	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
 
+TEST_IFlagLatency_IRQ:
+	STX <$50
+	LDA #0	
+	STX $4010	; disable the DMA IRQ
+	RTI
+;;;;;;;
+
+TEST_IFlagLatency_IRQ2:
+	INY
+	STY <$51
+	BEQ TEST_IFlagLatency_IRQ2_DontAcknowledgeIRQ
+	STX <$50
+	LDA #0	
+	STX $4010	; disable the DMA IRQ
+TEST_IFlagLatency_IRQ2_DontAcknowledgeIRQ:
+	RTI
+;;;;;;;
+
+TEST_IFlagLatency_StartTest:
+	SEI
+	LDA #0
+	LDY #$FF
+	STA <$50
+	STA <$51
+	JSR DMASync_50CyclesRemaining
+	LDX #0		; +2
+	LDA #$8F	; +2
+	STA $4010	; +4 (enable the DMA IRQ)
+	JSR Clockslide_34 ; +34
+	RTS			; +6
+;;;;;;;
+
+TEST_IFlagLatency_StartTest_10ExtraCycles:
+	SEI
+	LDA #0
+	LDY #$FF
+	STA <$50
+	STA <$51
+	JSR DMASync_50CyclesRemaining
+	LDX #0		; +2
+	LDA #$8F	; +2
+	STA $4010	; +4 (enable the DMA IRQ)
+	JSR Clockslide_24 ; +24
+	RTS			; +6
+;;;;;;;
+
+TEST_IFlagLatency_IRQPrep:
+	LDA #$4C
+	STA $600
+	LDA #LOW(TEST_IFlagLatency_IRQ)
+	STA $601
+	LDA #HIGH(TEST_IFlagLatency_IRQ)
+	STA $602
+	RTS
+;;;;;;;
+
+FAIL_IFlagLatency1:
+	SEI
+	JMP TEST_Fail
+
+TEST_IFlagLatency:
+	; How this works.
+	; The IRQ occurs when the CPU polls for interrupts, the "IRQ Level Detector" is low, and the I flag of the CPU is not set.
+	; As an emulator dev, this poses 2 questions. What sets the IRQ Level Detector low, and when does the CPU poll for interrupts?
+	; In an NROM cartridge, there are 2 ways the IRQ Level Detector is set low:
+	;	- If the DMC DMA's IRQ flag is set and the final byte of a DMC sample finishes playing. (this is the method used for this test)
+	;	- If the APU's frame counter IRQ is enabled, and the frame counter reaches the end of its sequence in mode 0.
+	; If the level detector is left low, an IRQ will happen again if the I flag is disabled. (The interrupt sets the I flag. Otherwise it would be an infinite slide of interrupts)
+	; The only way the IRQ Level Detector is set high again is by "acknowledging the IRQ".
+	; With the DMC DMA IRQ method, we acknowledge the IRQ by writing to $4010 to disable the IRQ.
+	;
+	; To understand the timing of IRQ Level Detector, We need to talk about a CPU cycle in even more depth.
+	; The clock line of the 6502 (called φ0) is used to form two seperate clock inputs. "φ1" is raised when φ0 is low. "φ2" is raised when φ0 is high.
+	; You can imagine a CPU cycle in 2 halves. φ1 and φ2.
+	;    ......:...........:...........:...........:...........:...........:...........:......
+	;    ┐     ┌─────┐     ┌─────┐     ┌─────┐     ┌─────┐     ┌─────┐     ┌─────┐     ┌─────┐     
+	; φ0 │     │     │     │     │     │     │     │     │     │     │     │     │     │     │  
+	;    └─────┘     └─────┘     └─────┘     └─────┘     └─────┘     └─────┘     └─────┘     └
+	;    [φ1]  [φ2]  [φ1]  [φ2]  [φ1]  [φ2]  [φ1]  [φ2]  [φ1]  [φ2]  [φ1]  [φ2]  [φ1]  [φ2]  
+	; During φ2 of each CPU cycle, (The timing of this is important when it comes to CPU/PPU Clock alignments, since the PPU is clocked 3 times as often as the CPU clock), the IRQ Level Detector is connected to the IRQ line of the 6502.
+	; 
+	; Finally, let's talk about "interrupt polling"
+	; Just because the IRQ line is set (and the I flag is not), that doesn't mean an IRQ will happen on the next CPU cycle.
+	; The CPU needs to poll for interrupts, and this happens (typically*) before the final CPU cycle of an instruction. If an interrupt was detected, then the following instruction will be an interrupt. (This also applies to the NMI)
+	; *A branch that isn't taken only polls once before the second cycle, while a branch that is taken additionally polls right before the fourth cycle. (in total, 2 polls.)
+	;	- This means that a branch that doesn't cross a page boundary will have the "interrupt delay". See the breakdown below.
+	;	- BRK seems to poll before cycle 2, 3, 4, and 5, notably not polling before cycles 6 and 7. This might be the cause of "Interrupt Hijacking"?
+	;
+	; And this process of polling is directly the cause for the latency in clearing the interrupt flag. Here are the order of operations:
+	;	- Assume the I flag is set. (Interrupts will not occur until cleared)
+	;	- The IRQ Level Detector is pulled low.
+	;	- on φ2, this is detected, and the IRQ pin of the 6502 is set.
+	;	- a CLI instruction runs:
+	;		- Cycle 1: read the opcode, $58. (An interrupt did not occur, so we keep it)
+	;		- Interrupt polling: The I flag is set, so the interrupt does not occur.
+	;		- Cycle 2, dummy read, and then clear the I flag.
+	;	- The next instruction occurs. Let's say it's a NOP.
+	;		- Cycle 1: read the opcode, $EA. (An interrupt did not occur, so we keep it)
+	;		- Interrupt polling: The I flag is not set, so the interrupt does occur!!!
+	;		- Cycle 2: dummy read.
+	;	- The next instruction occurs, but now we're running an interrupt!
+	;
+	; And you can follow this logic to see why the RTI instruction can update the I flag and be followed by another interrupt immediately:
+	;	- Assume the I flag is set. (Interrupts will not occur until cleared)
+	;	- The IRQ Level Detector is pulled low.
+	;	- on φ2, this is detected, and the IRQ pin of the 6502 is set.
+	;	- an RTI instruction runs:
+	;		- Cycle 1: read the opcode, $40. (An interrupt did not occur, so we keep it)
+	;		- Cycle 2: Dummy read
+	;		- Cycle 3: Dummy read at the stack pointer
+	;		- Cycle 4: Read from the stack, and copy the values to the processor flags. (Updates the I flag) Also increment the address bus low byte.
+	;		- Cycle 5: Read from the stack, this value is held in the data latch. Also increment the address bus low byte.
+	;		- Interrupt polling: The I flag is not set, so the interrupt does occur!!!
+	;		- Cycle 6: Update the low byte of the PC, Read from the stack, update the high byte of the PC, and copy the low byte of the address bus into the stack pointer.
+	;	- The next instruction occurs, but now we're running an interrupt, since the I flag was updated before polling!
+	;
+	; Let's also walk through that example with the branches, since I'll be testing for it.
+	;	- Assume the I flag is clear. (Interrupts will occur)
+	;	- Assume The IRQ Level Detector is pulled high. (It will be pulled low mid-instruction for this example)
+	;	- The Z flag is set.
+	;	- A BEQ instruction runs:
+	;		- Cycle 1: read the opcode, $F0. (An interrupt did not occur, so we keep it)
+	;		- Interrupt polling: The IRQ line is not set, so the interrupt does not occur.
+	;		- It's time for φ2, and let's say that this was timed such that the IRQ Level Detector went low just in time for this cycle, so the IRQ line is now set.
+	;		- Cycle 2: Read the operand, check the value of the Z Flag. It is set, so the instruction isn't over yet.
+	;		- Cycle 3: Dummy read, move the PC occording to the value read in the operand. Let's say the page boundary was not crossed. (End of instruction)
+	;	- Welp, the interrupts were not polled after the IRQ line was set, so the interrupt won't occur until after the next instruction.
+	;
+	; And by extension, you can follow this logic for the following instructions:
+	; 	- SEI: Polls happen before the I flag is set.
+	;	- PLP: Polls happen before the I flag is pulled off the stack.	
+	;
+	; And the test works by simply running an instruction that updates the I flag, running an INX, then the IRQ should run, storing X somewhere. We can see how long the delay was by measuing the value we stored.
+
+	JSR TEST_IFlagLatency_IRQPrep
+	
+	LDA #0	
+	STX $4010	; disable the DMA IRQ
+	LDA #$40
+	STA $4017	; disable the frame counter IRQ's
+
+	;;; Test 1 [Interrupt Flag Latency]: Does the IRQ happen at the correct cycle? ;;;
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	CLI			; +2
+	; DMA should happen here.
+	INX 		; +2
+	; IRQ should happen here.
+	INX ; If this happens before the IRQ, you fail the test. (The following tests rely on accurate DMC DMA IRQ timing, so even if an emulator does have proper interrupt polling but inaccuracte DMA timing, it will fail here.)
+	LDA <$50
+	CMP #01
+	BNE FAIL_IFlagLatency1
+	INC <currentSubTest
+
+	;;; Test 2 [Interrupt Flag Latency]: Does the IRQ happen immediately after CLI, or after the following instruction? ;;;
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	INX	; +2 (X=1)
+		; DMA should happen here.
+	CLI	; + 2
+		; The IRQ isn't detected until the end of the *next* instruction.
+	INX	; X=2
+		; IRQ should happen here.
+	INX
+	LDA <$50
+	CMP #02
+	BNE FAIL_IFlagLatency1
+	INC <currentSubTest
+	
+	;;; Test 3 [Interrupt Flag Latency]: Does SEI immediately prevent the IRQ from happening? (it should not) ;;;
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	INX	; +2
+		; DMA should happen here.
+	CLI	; +2
+	SEI ; +2
+		; The interrupt has already been detected before the I flag was set, so the IRQ will happen here. (The IRQ is acknowledged so it doesn't happen twice in this test)
+	INX
+	LDA <$50
+	CMP #01
+	BNE FAIL_IFlagLatency1
+	INC <currentSubTest
+
+	;;; Test 4 [Interrupt Flag Latency]: Check if the interrupt flag was pushed to the stack in the previous test (it should be) ;;;
+	TSX
+	DEX
+	DEX
+	LDA $100, X
+	AND #flag_i ; the I flag is #$04
+	BEQ FAIL_IFlagLatency1
+	INC <currentSubTest
+
+	;;; Test 5 [Interrupt Flag Latency]: Does the IRQ run again immediately after the RTI in SEI CLI? (it should) ;;;
+	LDA #LOW(TEST_IFlagLatency_IRQ2)
+	STA $601
+	LDA #HIGH(TEST_IFlagLatency_IRQ2)	; change the IRQ pointer. This new one only acknowledges the IRQ the second time it occurs.
+	STA $602
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	CLI	; +2
+		; DMA should happen here.
+	INX ; +2
+		; IRQ should happen here.
+		; Second IRQ should happen here.
+	INX ; If this happens before the IRQ, you fail the test.
+	SEI
+	LDA <$51 ; Did the IRQ run twice? (This uses the Y register, incremented in every IRQ, initialized to $FF, so $FF + 2 = 1. CMP #1.
+	CMP #1
+	BNE FAIL_IFlagLatency1
+	LDA <$50 ; Did the second IRQ run before the second INX?
+	CMP #1
+	BNE FAIL_IFlagLatency1
+	INC <currentSubTest
+
+	;;; Test 6 [Interrupt Flag Latency]: RTI updates the I flag before the check for an interrupt ;;;
+	JSR TEST_IFlagLatency_IRQPrep ; Re-set up the original IRQ routine.
+	; This next test uses and RTI, so let's set up the return address and flags.
+	LDA #HIGH(TEST_IFlagLatency_RTI)
+	PHA
+	LDA #LOW(TEST_IFlagLatency_RTI)
+	PHA
+	LDA #flag_i ; the I flag is #$04
+	PHA
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	LDA #$5A
+	; DMA should happen here.
+	STA <$50 ; The IRQ routine would overwrite this. The IRQ should not occur in this test.
+	CLI
+	RTI	
+TEST_IFlagLatency_RTI:
+	; The IRQ should not occur, as the RTI instruction updates the flags before polling for interrupts. RTI should pull off the flags such that the I flag is set, preventing interrupts.
+	INX	; Really not necessary, as the IRQ should not happen, so no matter what the value of X is, if $50 is overwritten, the test fails.
+	INX	; Really not necessary, as the IRQ should not happen, so no matter what the value of X is, if $50 is overwritten, the test fails.
+	LDA <$50
+	CMP #$5A
+	BNE FAIL_IFlagLatency
+	INC <currentSubTest
+
+	;;; Test 7 [Interrupt Flag Latency]: Does the IRQ happen immediately after PLP, or after the following instruction? ;;;
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	LDA #0
+	; DMA should happen here.
+	PLA
+	PLP	; Pull off the falgs. I flag is NOT set.
+	INX
+	; IRQ should happen here.
+	INX ; If this happens before the IRQ, you fail the test.
+	LDA <$50
+	CMP #01
+	BNE FAIL_IFlagLatency
+	INC <currentSubTest
+
+	;;; Test 8 [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 2? (They should) ;;;
+	JSR TEST_IFlagLatency_StartTest ; clear address $50, and sync with DMA. X=0
+	LDA <$50
+	; DMA should happen here.
+	CMP #$5A
+	CLV	; clear overflow flag.
+	CLI	
+	BVS	TEST_IFlagLatency_Branch1	; This branch will NOT be taken.
+TEST_IFlagLatency_Branch1:
+	; IRQ should happen here.
+	INX 
+	LDA <$50
+	CMP #$00
+	BNE FAIL_IFlagLatency
+	INC <currentSubTest
+	
+	;;; Test 9 [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 3? (They should not) ;;;
+	JSR TEST_IFlagLatency_StartTest_10ExtraCycles ; clear address $50, and sync with DMA. X=0. We have 12 cycles until the DMA instead of the usual 2 these tests have used.
+	LDA #$5A ; +2 (10 cycles until DMA)
+	STA <$50 ; +3 (7 cycles until DMA)
+	LDA <currentSubTest ; +3 cycles (4 cycles until DMA). This is also using a known non-zero-value, so this branch WILL be taken.
+	CLI		 ; +2 cycles (2 cycles until DMA)
+	BNE TEST_IFlagLatency_Branch2 ; [1: read opcode] (poll for interrupts, no interrupts) [2: read operand] [DMC DMA, set IRQ Level detector low] [3: move the PC] (End of instruction. did not poll again).
+TEST_IFlagLatency_Branch2:
+	INX
+	; IRQ should happen here.
+	LDA <$50
+	CMP #$01
+	BNE FAIL_IFlagLatency
+	INC <currentSubTest
+	; And hey, if you pass this one, keep in mind that I only test with BNE here, but this applies to every branch, not just BNE.
+	
+	; This next test needs to occur at a known page boundary, so let's jump to approximately address $FE00.
+	; It doesn't return, so the end of the test just happens out there.
+	JMP TEST_IFlagLatency_PageBoundaryTest
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FAIL_IFlagLatency:
+	SEI
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+	
+	
 	
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -7679,11 +7971,39 @@ VblSync_Plus_A_End: ; Moved here for space. This is the end of the VblSync_Plus_
 	RTS
 ;;;;;;;
 
-	.org $FE00
-	
-	; 17 $40's in a row.
-	.byte $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40, $40
-	
+	.org $FDF3
+TEST_IFlagLatency_PageBoundaryTest:
+	;;; Test A [Interrupt Flag Latency]: Do branches poll for interrupts before cycle 4? (They should) ;;;
+	JSR TEST_IFlagLatency_StartTest_10ExtraCycles ; clear address $50, and sync with DMA. X=0. We have 12 cycles until the DMA instead of the usual 2 these tests have used.
+	LDA #$5A ; +2 (10 cycles until DMA)
+	STA <$50 ; +3 (7 cycles until DMA)
+	LDA <currentSubTest ; +3 cycles (4 cycles until DMA). This is also using a known non-zero-value, so this branch WILL be taken.
+	CLI		 ; +2 cycles (2 cycles until DMA)
+	BNE TEST_IFlagLatency_Branch3 ; [1: read opcode] (poll for interrupts, no interrupts) [2: read operand] [DMC DMA, set IRQ Level detector low] [3: move the PC] (Poll for interrupts, we got one!) [4: update PC high]
+	NOP	; The PC will be here at address $FEFF while taking the branch.
+	; Address $FE00:
+	.byte $40 ; This is the DPCM sample used for the APU Register Activation test.
+
+	; Address $FE01:
+TEST_IFlagLatency_Branch3:
+	; IRQ should happen here.
+	INX
+	LDA <$50
+	CMP #$00
+	BNE FAIL_IFlagLatency2
+
+	;; END OF TEST ;;
+	SEI
+	LDA #1
+	RTS
+;;;;;;;
+FAIL_IFlagLatency2:
+	SEI
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+	; Address $FE0F:
+
+	.org $FE49	
 DMASyncWith40:
 	; This fuction very relaibly exits with exactly 50 CPU cycles until the DMA occurs.
 	; However, it relies on open bus behavior, with the consequence of an infinite loop if not correctly emulated.
@@ -7718,9 +8038,7 @@ DMASync40_Loop:
 	CMP <$C9
 	RTS 
 	; so we have 50 cycles to go.
-	
-	.org $FE87
-	
+		
 DMASyncButSlightlyLessReliable:
 	; This fuction *should* exit with exactly 406 CPU cycles until the DMA occurs. It does on my console, but not so much for various emulators.
 	; But hey, this one doesn't rely on open bus, and won't infinite loop.
@@ -7896,7 +8214,7 @@ DMASync_TheGoodOne:
 	STA $4011 ; minimum value of DMC
 	LDA #$FF
 	STA $4012 ; Sample address $FFC0.
-	LDA #1
+	LDA #0
 	STA $4013 ; #1 * 16 + 1 = 17 byte length.
 	LDA #$10
 	STA $4015 ; Start the DMC DMA loop
