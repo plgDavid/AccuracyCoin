@@ -217,6 +217,7 @@ result_ControllerStrobing = $45F
 
 result_InstructionTiming = $460
 result_IFlagLatency = $461
+result_NmiAndBrk = $462
 
 
 result_PowOn_CPURAM = $0480
@@ -529,9 +530,9 @@ Suite_UnofficialOps_Immediates:
 Suite_CPUInterrupts:
 	.byte "CPU Interrupts", $FF
 	table "Interrupt flag latency", $FF, result_IFlagLatency, TEST_IFlagLatency
-	table "NMI AND BRK", $FF, result_Unimplemented, DebugTest
+	table "NMI AND BRK", $FF, result_NmiAndBrk, TEST_NmiAndBrk
 	table "NMI AND IRQ", $FF, result_Unimplemented, DebugTest
-	table "IRQ AND DMA", $FF, result_Unimplemented, DebugTest
+	table "IRQ AND OAM DMA", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
 	;; DMA Tests ;;
@@ -6211,9 +6212,114 @@ FAIL_IFlagLatency:
 	SEI
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
+
+TEST_NmiAndBrk_BRK:
+	STX <Copy_X
+	TSX
+	JSR Clockslide_50
+	LDA $101,X ; read the flags without running PLA, since PLA pokes them a bit.
+	LDX <Copy_X
+	STA $520,X ; Store the results at $520.
+	RTI
+
+TEST_NmiAndBrk_NMI:
+	STX <Copy_X
+	TSX
+	JSR Clockslide_50
+	LDA $101,X ; read the flags without running PLA, since PLA pokes them a bit.
+	LDX <Copy_X
+	STA $500,X ; Store the results at $500.
+	RTI
+
+TEST_NmiAndBrk:
+	LDA #$4C
+	STA $600
+	STA $700
+	LDA #LOW(TEST_NmiAndBrk_BRK)
+	STA $601
+	LDA #HIGH(TEST_NmiAndBrk_BRK)	; change the IRQ pointer.
+	STA $602
+	LDA #LOW(TEST_NmiAndBrk_NMI)
+	STA $701
+	LDA #HIGH(TEST_NmiAndBrk_NMI)	; change the NMI pointer.
+	STA $702
+	;;; Test 1 [NMI and BRK]: What happens when the NMI runs during a BRK instruction? (Error 1 means BRK didn't skip the following byte) ;;;
+	; Also known as Interrupt Hijacking, this test will simply sync the CPU such that the NMI will occur in 8-A cycles. Then it will run this 16 times, incrementing A by 1 for each test.
+	; Here's how it works:
+	; After an NMI or BRK, read the value pushed to the stack, and store at <$50,X or <$60,X respectively.
+	; Then just read all the values and compare with an answer key.
+	JSR DisableRendering
+	LDX #0
+TEST_NmiAndBrkLoop:
+	STX <Copy_X
+	LDA #0
+	JSR VblSync_Plus_A
+	JSR Clockslide_29700
+	; 80 CPU cycles until Vblank.
+	JSR EnableNMI ; +31 CPU cycles. (49 cycles until vblank)
+	LDX <Copy_X	  ; +3
+	TXA			  ; +2 (44 cycles)
+	JSR Clockslide36_Plus_A ; + 36 + A
+	; 8-A CPU cycles until Vblank.
+	; stall for an extra 6 cycles.
+	LDY #0
+	NOP
+	NOP
+	BRK ; BRK will return *after* this upcoming INY, since it only gets compiled to [$00].
+	INY	; This should get skipped!
+	TYA
+	BNE FAIL_NmiAndBrk
+	INX ; X+=1
+	CPX #32
+	BNE TEST_NmiAndBrkLoop
+	INC <currentSubTest
 	
+	;;; Test 1 [NMI and BRK]: Check the asnwer key. ;;;
+	; And now we check with the answer key.
+	JSR DisableNMI
+	LDX #0
+TEST_NmiAndBrkAnswerLoop:
+	LDA $500,X
+	CMP TEST_NmiAndBrkAnswerKey, X
+	BNE TEST_NmiAndBrk_TryKey2
+	INX
+
+	CPX #64
+	BNE TEST_NmiAndBrkAnswerLoop
 	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+
+TEST_NmiAndBrk_TryKey2:
+	LDX #0
+TEST_NmiAndBrkAnswerLoop2:
+	LDA $500,X
+	CMP TEST_NmiAndBrkAnswerKey_Alignment2, X
+	BNE FAIL_NmiAndBrk
+	INX
+
+	CPX #64
+	BNE TEST_NmiAndBrkAnswerLoop2
 	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+
+FAIL_NmiAndBrk:
+	JMP TEST_Fail
+	
+	.bank 2
+	.org $C000
+TEST_NmiAndBrkAnswerKey:   
+	.byte $27, $37, $37, $36, $37, $26, $27, $26, $27, $26, $27, $24, $25, $24, $25, $24, $25, $24, $25, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
+	.byte $37, $00, $00, $00, $00, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36
+TEST_NmiAndBrkAnswerKey_Alignment2: ; CPU/PPU clock alignment 2 has different results:
+    .byte $37, $37, $37, $36, $27, $26, $27, $26, $27, $26, $25, $24, $25, $24, $25, $24, $25, $24, $25, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
+    .byte $00, $00, $00, $00, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                ENGINE                   ;;
@@ -7511,6 +7617,7 @@ PrintByte:	; Takes the A register and prints each nybble seperately as two chara
 	; This doesn't make any stack shenanigans.
 	PHA
 	PHA
+	STX <Copy_X
 	AND #$F0
 	LSR A
 	LSR A
@@ -7528,6 +7635,7 @@ PB_SkipHighlight:
 	ORA #$80
 PB_SkipHighlight1:
 	STA $2007
+	LDX <Copy_X
 	PLA
 	RTS
 ;;;;;;;
@@ -7781,7 +7889,7 @@ CRAICPUC_NMI: ; Convert Return Address Into CPU Cycles NMI Routine
 	; "What's a clockslide?"
 	; It's just a subroutine that wastes a precise amount of CPU cycles.
 	; If you want to waste exactly n cycles, run JSR Clockslide_n
-	; (Clockslide_14 through Clocklside_50 are defined, and most larger clockslides are a combination of JSRs to those clockslides)
+	; (Clockslide_14 through Clockslide_50 are defined, and most larger clockslides are a combination of JSRs to those clockslides)
 Clockslide_100:       ;=6
 	JSR Clockslide_38 ;=44
 	JSR Clockslide_50 ;=94
@@ -7979,8 +8087,8 @@ Clockslide_28780:		;=6
 
 Clockslide36_Plus_A:;+6
 	STA <$00	; +3
-	LDX #$FF	; +2
-	STX <$01	; +3
+	LDA #$FF	; +2
+	STA <$01	; +3
 	LDA #37		; +2
 	SEC			; +2
 	SBC <$00	; +3
