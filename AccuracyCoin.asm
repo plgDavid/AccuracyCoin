@@ -218,7 +218,7 @@ result_ControllerStrobing = $45F
 result_InstructionTiming = $460
 result_IFlagLatency = $461
 result_NmiAndBrk = $462
-
+result_NmiAndIrq = $463
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -531,7 +531,7 @@ Suite_CPUInterrupts:
 	.byte "CPU Interrupts", $FF
 	table "Interrupt flag latency", $FF, result_IFlagLatency, TEST_IFlagLatency
 	table "NMI AND BRK", $FF, result_NmiAndBrk, TEST_NmiAndBrk
-	table "NMI AND IRQ", $FF, result_Unimplemented, DebugTest
+	table "NMI AND IRQ", $FF, result_NmiAndIrq, TEST_NmiAndIrq
 	table "IRQ AND OAM DMA", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
@@ -6223,6 +6223,7 @@ TEST_NmiAndBrk_BRK:
 	RTI
 
 TEST_NmiAndBrk_NMI:
+TEST_NmiAndIrq_NMI:
 	STX <Copy_X
 	TSX
 	JSR Clockslide_50
@@ -6231,7 +6232,7 @@ TEST_NmiAndBrk_NMI:
 	STA $500,X ; Store the results at $500.
 	RTI
 
-TEST_NmiAndBrk:
+TEST_NmiAndBrk_Prep:
 	LDA #$4C
 	STA $600
 	STA $700
@@ -6243,6 +6244,11 @@ TEST_NmiAndBrk:
 	STA $701
 	LDA #HIGH(TEST_NmiAndBrk_NMI)	; change the NMI pointer.
 	STA $702
+	RTS
+;;;;;;;
+
+TEST_NmiAndBrk:
+	JSR TEST_NmiAndBrk_Prep
 	;;; Test 1 [NMI and BRK]: What happens when the NMI runs during a BRK instruction? (Error 1 means BRK didn't skip the following byte) ;;;
 	; Also known as Interrupt Hijacking, this test will simply sync the CPU such that the NMI will occur in 8-A cycles. Then it will run this 16 times, incrementing A by 1 for each test.
 	; Here's how it works:
@@ -6274,7 +6280,7 @@ TEST_NmiAndBrkLoop:
 	BNE TEST_NmiAndBrkLoop
 	INC <currentSubTest
 	
-	;;; Test 1 [NMI and BRK]: Check the asnwer key. ;;;
+	;;; Test 2 [NMI and BRK]: Check the answer key. ;;;
 	; And now we check with the answer key.
 	JSR DisableNMI
 	LDX #0
@@ -6311,7 +6317,7 @@ TEST_NmiAndBrkAnswerLoop2:
 FAIL_NmiAndBrk:
 	JMP TEST_Fail
 	
-	.bank 2
+	.bank 2	; If I don't do this, the ROM won't compile.
 	.org $C000
 TEST_NmiAndBrkAnswerKey:   
 	.byte $27, $37, $37, $36, $37, $26, $27, $26, $27, $26, $27, $24, $25, $24, $25, $24, $25, $24, $25, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
@@ -6319,6 +6325,121 @@ TEST_NmiAndBrkAnswerKey:
 TEST_NmiAndBrkAnswerKey_Alignment2: ; CPU/PPU clock alignment 2 has different results:
     .byte $37, $37, $37, $36, $27, $26, $27, $26, $27, $26, $25, $24, $25, $24, $25, $24, $25, $24, $25, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
     .byte $00, $00, $00, $00, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36
+
+TEST_NmiAndIrq_Prep:
+	LDA #$4C
+	STA $602
+	STA $700
+	LDA #LOW(TEST_NmiAndIrq_IRQ)
+	STA $603
+	LDA #HIGH(TEST_NmiAndIrq_IRQ)	; change the IRQ pointer.
+	STA $604
+	LDA #LOW(TEST_NmiAndIrq_NMI)
+	STA $701
+	LDA #HIGH(TEST_NmiAndIrq_NMI)	; change the NMI pointer.
+	STA $702
+	LDA #$A9
+	STA $600
+	LDA #$FF
+	STA $601
+	RTS
+;;;;;;;
+
+TEST_NmiAndIrq_IRQ:
+	STX <Copy_X
+	TSX
+	JSR Clockslide_50
+	LDA $101,X ; read the flags without running PLA, since PLA pokes them a bit.
+	; Okay cool, now set the I flag there.
+	ORA #4
+	STA $101,X ; I'd prefer if this didn't infinitely loop, and I'd also like to not have to wait for the IRQ line to be set again, so we're not acknowledging it.
+	LDX <Copy_X
+	STA $510,X ; Store the results at $520.
+	RTI
+;;;;;;;
+
+TEST_NmiAndIrq_SetIRQ:
+	JSR DMASync_50CyclesRemaining
+	LDX #0		; +2
+	LDA #$8F	; +2
+	STA $4010	; +4 (enable the DMA IRQ)
+	JSR Clockslide_34 ; +34
+	RTS			; +6
+;;;;;;;
+
+
+TEST_NmiAndIrq:
+	JSR TEST_NmiAndIrq_Prep
+	JSR TEST_NmiAndIrq_SetIRQ
+	; Great! now we set the I flag so this IRQ never runs until we need it.
+	SEI
+	; This is very similar to the NMI and BRK test ,except instead of a BRK, we just have an IRQ to occur.
+	JSR DisableRendering
+	LDX #0
+TEST_NmiAndIrqLoop:
+	STX <Copy_X
+	LDA #0
+	JSR VblSync_Plus_A
+	JSR Clockslide_29700
+	; 80 CPU cycles until Vblank.
+	JSR EnableNMI ; +31 CPU cycles. (49 cycles until vblank)
+	LDX <Copy_X	  ; +3
+	TXA			  ; +2 (44 cycles)
+	JSR Clockslide36_Plus_A ; + 36 + A
+	; 8-A CPU cycles until Vblank.
+	; stall for an extra 6 cycles.
+	CLI
+	LDA #0	; set the zero flag.
+	; Assuming you passed the Interrupt flag latency test, the IRQ will occur here!
+	NOP
+	INX ; X+=1
+	CPX #16
+	BNE TEST_NmiAndIrqLoop
+	
+	LDA #0
+	STA $4010 ; acknowledge the IRQ, now that we're done.
+	SEI
+	
+	;;; Test 1 [NMI and IRQ]: Check the answer key. ;;;
+	JSR DisableNMI
+	LDX #0
+TEST_NmiAndIrqAnswerLoop:
+	LDA $500,X
+	CMP TEST_NmiAndIqrAnswerKey, X
+	BNE TEST_NmiAndIrq_TryAlignment2
+	INX
+	CPX #32
+	BNE TEST_NmiAndIrqAnswerLoop
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+	
+TEST_NmiAndIrq_TryAlignment2:
+	LDX #0
+TEST_NmiAndIrqAnswerLoop2:
+	LDA $500,X
+	CMP TEST_NmiAndIqrAnswerKey_Alignment2, X
+	BNE FAIL_NmiAndIqr
+	INX
+	CPX #32
+	BNE TEST_NmiAndIrqAnswerLoop2
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+TEST_NmiAndIqrAnswerKey:
+	.byte $A5, $A5, $23, $22, $23, $22, $23, $22, $23, $20, $21, $24, $25, $24, $25, $24
+	.byte $27, $27, $27, $26, $27, $26, $27, $26, $27, $24, $25, $26, $27, $26, $27, $26
+	
+TEST_NmiAndIqrAnswerKey_Alignment2:
+	.byte $A5, $23, $23, $22, $23, $22, $23, $22, $21, $20, $25, $24, $25, $24, $25, $24
+	.byte $27, $27, $27, $26, $27, $26, $27, $26, $25, $24, $27, $26, $27, $26, $27, $26
+
+FAIL_NmiAndIqr:
+	JMP TEST_Fail
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
