@@ -220,6 +220,8 @@ result_IFlagLatency = $461
 result_NmiAndBrk = $462
 result_NmiAndIrq = $463
 
+result_RMW2007 = $464
+
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
 result_PowOn_PPURAM = $0482
@@ -384,8 +386,9 @@ TableTable:
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
 	.word Suite_PowerOnState
-	.word Suite_PPUBehavior
+	.word Suite_PPUTiming
 	.word Suite_SpriteZeroHits
+	.word Suite_PPUMisc
 EndTableTable:
 
 
@@ -532,7 +535,6 @@ Suite_CPUInterrupts:
 	table "Interrupt flag latency", $FF, result_IFlagLatency, TEST_IFlagLatency
 	table "NMI AND BRK", $FF, result_NmiAndBrk, TEST_NmiAndBrk
 	table "NMI AND IRQ", $FF, result_NmiAndIrq, TEST_NmiAndIrq
-	table "IRQ AND OAM DMA", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 	
 	;; DMA Tests ;;
@@ -543,9 +545,6 @@ Suite_DMATests:
 	table "DMA + $4015 Read", $FF, result_DMA_Plus_4015R, TEST_DMA_Plus_4015R
 	table "DMA + $4016 Read", $FF, result_DMA_Plus_4016R, TEST_DMA_Plus_4016R
 	table "Controller Strobing", $FF, result_ControllerStrobing, TEST_ControllerStrobing
-	table "DMC DMA + OAM DMA", $FF, result_Unimplemented, DebugTest
-	table "DMC DMA Implicit Stop", $FF, result_Unimplemented, DebugTest
-	table "DMC DMA Explicit Stop", $FF, result_Unimplemented, DebugTest
 	table "APU Register Activation", $FF, result_APURegActivation, TEST_APURegActivation
 	.byte $FF
 	
@@ -560,7 +559,7 @@ Suite_PowerOnState:
 	.byte $FF
 	
 	;; PPU VBL Timing ;;
-Suite_PPUBehavior:
+Suite_PPUTiming:
 	.byte "PPU VBlank Timing", $FF
 	table "VBlank beginning", $FF, result_VBlank_Beginning, TEST_VBlank_Beginning
 	table "VBlank end", $FF, result_VBlank_End, TEST_VBlank_End
@@ -580,14 +579,14 @@ Suite_SpriteZeroHits:
 	table "Sprite overflow behavior", $FF, result_SprOverflow_Behavior, TEST_SprOverflow_Behavior
 	table "Misaligned OAM behavior", $FF, result_MisalignedOAM_Behavior, TEST_MisalignedOAM_Behavior
 	table "Address $2004 behavior", $FF, result_Address2004_Behavior, TEST_Address2004_Behavior
-
 	.byte $FF
 	
 	
 	;; PPU Misc ;;
 Suite_PPUMisc:
 	.byte "PPU Misc.", $FF
-	table "Palette Corruption", $FF, result_Unimplemented, DebugTest
+	table "RMW $2007", $FF, result_RMW2007, TEST_RMW2007
+	;table "Palette Corruption", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 
 	
@@ -6440,6 +6439,112 @@ TEST_NmiAndIqrAnswerKey_Alignment2:
 
 FAIL_NmiAndIqr:
 	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+
+TEST_RMW2007:
+	;;; Test 1 [RMW $2007]: Does a Read-Modify-Write instruction to address $2007 perform an extra write? ;;;
+	; This behavior only seems to be consistent if the nametable in which the test is occuring is *all zeroes*.
+	; To be more specific, there's probably going to be 3 writes:
+	;	-1) The write at "v", which is different depending on console/PPU revisions. (I can't in good consience test for this one, considering the different console behavior)
+	;	-2) The "unexpected" write. Write the modified buffer value to: (v & $FF00) | (modified buffer value)
+	;	-3) The third write, which is different depending on CPU/PPU clock alignments, and console/PPU revisions. (I can't in good consience test for this one, considering the different console behavior)
+	;
+	; This test is checking the second case, since as far as I can tell, it is consistent across different consoles.
+	; So here's how the test will work.
+	; Set up the ppu read buffer.
+	; Move v to some location for the test.
+	; run some read-modify-write instruction to $2007
+	; then just read the location of the second write, which should always be (v & $FF00) | (modified buffer value)
+	JSR DisableRendering
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
+	LDA #0
+	TAY
+	LDX #4
+TEST_RMW2007_ClearNametableLoop:
+	STA $2007
+	DEY
+	BNE TEST_RMW2007_ClearNametableLoop
+	DEX
+	BNE TEST_RMW2007_ClearNametableLoop
+	; Okay, cool. address $2400 to $27FF are now all zeroes.
+	
+	LDA #$5A
+	JSR SetPPUReadBufferToA
+	; the PPU read buffer is 5A.
+	JSR SetPPUADDRFromWord
+	.byte $25, $00
+	; For the first test here, "v" will be set to $2500
+	INC $2007
+	; And here's what happened.
+	; Cycle 1: read opcode ($EE)
+	; Cycle 2: read operand ($07)
+	; Cycle 3: read operand ($20)
+	; Cycle 4: Read the PPU-read-buffer ($5A)
+	; Cycle 5: Write ($5A) to $2007. (also INC $5A to $5B) !! Inconsistent behavior depending on console revision: Who knows what VRAM address was just updated, if any.
+	; Cycle 6: Write ($5B) to $2007. This will write to VRAM address $255B. (Also some third write, but that's inconsistent depending on console revision too.)
+	;
+	; Let's read address $255B
+	JSR ReadPPUADDRFromWord
+	.byte $25, $5B
+	CMP #$5B
+	BNE FAIL_RMW2007
+	INC <currentSubTest
+	;;; Test 2 [RMW $2007]: Is palette RAM inaccessible to this extra write? ;;;
+	
+	JSR WaitForVBlank ; moving v to palette RAM while rendering is disabled will draw a series of pixels of the color at that palette ram index. I'd like to hide this inside vblank.
+	; Reading from palette RAM does not use the PPU read buffer.
+	JSR SetPPUADDRFromWord
+	.byte $3F, $0D	; the color at this address is $2A
+	
+	INC $2007
+	; And here's what happened.
+	; Cycle 1: read opcode ($EE)
+	; Cycle 2: read operand ($07)
+	; Cycle 3: read operand ($20)
+	; Cycle 4: Read the palette RAM address $0D ($2A)
+	; Cycle 5: Write ($2A) to $2007. (also INC $2A to $2B) !! Inconsistent behavior depending on console revision: Who knows what VRAM address was just updated, if any.
+	; Cycle 6: Write ($2B) to $2007. This should just write to Palette RAM $0E. (Also some third write, but that's inconsistent depending on console revision too.)
+		
+	; Did we write $2B to $3F2B? (We shouldn't have)
+	JSR SetPPUADDRFromWord
+	.byte $3F, $2B
+	LDA $2007 ; Palette RAM doesn't use the PPU Read buffer.
+	CMP #$2B
+	BEQ FAIL_RMW2007
+	INC <currentSubTest
+
+	;;; Test 3 [RMW $2007]: Did we write to the nametable at $3F2B instead? (Well- the mirror at $272B.) ;;;
+	; As it turns out, you shouldn't have written there either.
+	JSR ReadPPUADDRFromWord
+	.byte $27, $2B
+	CMP #$2B
+	BEQ FAIL_RMW2007
+	INC <currentSubTest
+
+	;;; Test 4 [RMW $2007]: Did we write to the correct palette RAM address? ;;;
+	JSR SetPPUADDRFromWord
+	.byte $3F, $0E
+	LDA $2007 ; Palette RAM doesn't use the PPU Read buffer.
+	CMP #$2B
+	BNE FAIL_RMW2007
+	INC <currentSubTest
+		
+	;; END OF TEST ;;
+	JSR ResetScroll
+	JSR WaitForVBlank
+	JSR SetUpDefaultPalette
+	LDA #1
+	RTS
+;;;;;;;
+	
+FAIL_RMW2007:
+	; we probably want to reset this nametable to be a bunch of $24's right?
+	JSR ResetScroll
+	JSR WaitForVBlank
+	JSR SetUpDefaultPalette
+	JMP TEST_Fail
+	
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -7366,6 +7471,18 @@ WriteToPPUADDRWithByteExit:
 DoubleLDA2007:	; There are a few tests that need to read the contents of a PPU address.
 	LDA $2007	; and instead of actually writing out LDA $2007 twice (6 bytes)
 	LDA $2007	; you can just jump here instead. (3 bytes)
+	RTS
+;;;;;;;
+
+SetPPUReadBufferToA: ; Sets the value of the PPU Read buffer to A.
+	PHA
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
+	STA $2007
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
+	LDA $2007
+	PLA
 	RTS
 ;;;;;;;
 
