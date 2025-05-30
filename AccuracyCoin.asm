@@ -222,6 +222,8 @@ result_NmiAndIrq = $463
 
 result_RMW2007 = $464
 
+result_APU_LengthCounter = $465
+
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
 result_PowOn_PPURAM = $0482
@@ -385,6 +387,7 @@ TableTable:
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
+	.word Suite_APUCounter
 	.word Suite_PowerOnState
 	.word Suite_PPUTiming
 	.word Suite_SpriteZeroHits
@@ -533,8 +536,8 @@ Suite_UnofficialOps_Immediates:
 Suite_CPUInterrupts:
 	.byte "CPU Interrupts", $FF
 	table "Interrupt flag latency", $FF, result_IFlagLatency, TEST_IFlagLatency
-	table "NMI AND BRK", $FF, result_NmiAndBrk, TEST_NmiAndBrk
-	table "NMI AND IRQ", $FF, result_NmiAndIrq, TEST_NmiAndIrq
+	table "NMI Overlap BRK", $FF, result_NmiAndBrk, TEST_NmiAndBrk
+	table "NMI Overlap IRQ", $FF, result_NmiAndIrq, TEST_NmiAndIrq
 	.byte $FF
 	
 	;; DMA Tests ;;
@@ -546,6 +549,12 @@ Suite_DMATests:
 	table "DMA + $4016 Read", $FF, result_DMA_Plus_4016R, TEST_DMA_Plus_4016R
 	table "Controller Strobing", $FF, result_ControllerStrobing, TEST_ControllerStrobing
 	table "APU Register Activation", $FF, result_APURegActivation, TEST_APURegActivation
+	.byte $FF
+	
+	;; APU Counters ;;
+Suite_APUCounter:
+	.byte "APU Counters", $FF
+	table "Length Counter", $FF, result_APU_LengthCounter, TEST_APU_LengthCounter
 	.byte $FF
 	
 	;; Power On State ;;
@@ -589,7 +598,6 @@ Suite_PPUMisc:
 	;table "Palette Corruption", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 
-	
 	
 	.bank 1
 	.org $A000
@@ -1036,7 +1044,7 @@ TEST_DummyReads:
 	
 	;;; Test B [Dummy Read Cycles]: STA ($2002,X) does not dummy-read $2002 ;;;
 	LDX #0
-	JSR Clockslide_29780 ; Wait  a frame so the VBlank flag gets set
+	JSR Clockslide_29780 ; Wait a frame so the VBlank flag gets set
 	STA [$50,X]
 	BPL TEST_Fail3 ; If bit 7 of A is set, then we pass the test. The dummy read was at $0050, which we can't test for.	
 	;; END OF TEST ;;
@@ -5642,6 +5650,21 @@ TEST_ControllerStrobing:
 FAIL_InstructionTiming:
 	JMP TEST_Fail
 
+TEST_InstructionTiming_EvenOverhead:
+	LDA <$64	; Copy the high byte of the results
+	STA <$62	; Paste to the high byte of the odd overhead
+	LDA <$65	; Copy the low byte of the results
+	STA <$63	; Paste to the low byte of the odd overhead.
+	RTS
+;;;;;;;
+TEST_InstructionTiming_OddOverhead:
+	LDA <$66	; Copy the high byte of the results
+	STA <$62	; Paste to the high byte of the odd overhead
+	LDA <$67	; Copy the low byte of the results
+	STA <$63	; Paste to the low byte of the odd overhead.
+	RTS
+;;;;;;;
+
 TEST_InstructionTiming:
 	;;; Test 1 [Instruction Timing]: Is the NMI Timing Reliable enough for this test? ;;;
 	; How this test works:
@@ -5659,14 +5682,28 @@ TEST_InstructionTiming:
 	; So let's run a "callibration test"
 	JSR SyncTo1000CyclesUntilNMI
 	JSR $500	; wait for NMI, which records the return address, then jumps to ConvertReturnAddressIntoCPUCycles
-	; The results stored in $60 and $61 *should* be zero, but some emulators might fail this, due to incorrect NMI timing.
+	; The results stored in $60 and $61 *should* be zero, but some emulators might fail this, due to incorrect NMI timing. (Or perhaps, due to CPU/PPU alignment, the timing could be off)
 	; Basically, we take this value (which should be zero) and use that as the "overhead" in future tests.
 	; So if the value was 04, indicating that the NMI happened 4 cycles later than expected, we subtract 4 from all of the future tests.
 	LDA <$60	; Copy the high byte of the results
-	STA <$62	; Paste to the high byte of the overhead
+	STA <$64	; Paste to the high byte of the even overhead
 	LDA <$61	; Copy the low byte of the results
-	STA <$63	; Paste to the low byte of the overhead.
-	; Let's run it again!
+	STA <$65	; Paste to the low byte of the even overhead.
+	; Let's also calibrate for an odd number of cycles. In this case, 3.
+	; Set the overhead to 3.
+	LDA #3
+	STA <$63
+	JSR SyncTo1000CyclesUntilNMI
+	LDA <$00	; take 3 cycles
+	JSR $500	; wait for NMI, which records the return address, then jumps to ConvertReturnAddressIntoCPUCycles
+	; and store the overhead.
+	LDA <$60	; Copy the high byte of the results
+	STA <$66	; Paste to the high byte of the odd overhead
+	LDA <$61	; Copy the low byte of the results
+	STA <$67	; Paste to the low byte of the odd overhead.
+	; Now that we have calculated the overheads, let's run a real test.
+	JSR TEST_InstructionTiming_EvenOverhead
+	
 	JSR SyncTo1000CyclesUntilNMI
 	JSR $500	
 	LDA <$60
@@ -5690,6 +5727,7 @@ TEST_InstructionTiming:
 	INC <currentSubTest
 	
 	;;; Test 2 [Instruction Timing]: Does LDA #Immediate take 2 cycles? ;;;
+	JSR TEST_InstructionTiming_EvenOverhead
 	JSR SyncTo1000CyclesUntilNMI
 	LDA #$5A ; this takes 2 cycles.
 	JSR $500 ; run timing test.
@@ -5699,25 +5737,26 @@ TEST_InstructionTiming:
 	INC <currentSubTest
 
 	;;; Test 3 [Instruction Timing]: Does LDA <ZeroPage take 3 cycles? ;;;
+	JSR TEST_InstructionTiming_OddOverhead
 	JSR SyncTo1000CyclesUntilNMI
 	LDA <$00 ; this takes 3 cycles.
 	JSR $500 ; run timing test.
 	LDA #03 
 	CMP <$61
-	BNE FAIL_InstructionTiming ; this should be $03.
+	BNE FAIL_InstructionTiming1 ; this should be $03.
 	INC <currentSubTest
 	
 	;;; Test 4 [Instruction Timing]: Does LDA Absolute take 4 cycles? ;;;
+	JSR TEST_InstructionTiming_EvenOverhead
 	JSR SyncTo1000CyclesUntilNMI
 	LDA $0000 ; this takes 4 cycles.
 	JSR $500 ; run timing test.
 	LDA #04 
 	CMP <$61
-	BNE FAIL_InstructionTiming ; this should be $04.
+	BNE FAIL_InstructionTiming1 ; this should be $04.
 	INC <currentSubTest
 	
 	;;; Test 5 [Instruction Timing]: Does LDA Absolute, X take 4 cycles if a page boundary is NOT crossed? ;;;
-	INC <currentSubTest
 	JSR SyncTo1000CyclesUntilNMI
 	LDX #02	  ; This take 2 cycles
 	LDA $0000, X ; this takes 4 cycles.
@@ -5728,7 +5767,7 @@ TEST_InstructionTiming:
 	INC <currentSubTest
 	
 	;;; Test 6 [Instruction Timing]: Does LDA Absolute, X take 5 cycles if a page boundary IS crossed? ;;;
-	INC <currentSubTest
+	JSR TEST_InstructionTiming_OddOverhead
 	JSR SyncTo1000CyclesUntilNMI
 	LDX #02	  ; This take 2 cycles
 	LDA $00FF, X ; this takes 5 cycles.
@@ -5739,7 +5778,6 @@ TEST_InstructionTiming:
 	INC <currentSubTest
 	
 	;;; Test 7 [Instruction Timing]: Does LDA (indirect),Y take 5 cycles if a page boundary is NOT crossed? ;;;
-	INC <currentSubTest
 	LDA #0
 	STA <Test_UnOp_IndirectPointerLo
 	STA <Test_UnOp_IndirectPointerHi
@@ -5753,7 +5791,7 @@ TEST_InstructionTiming:
 	INC <currentSubTest
 
 	;;; Test 8 [Instruction Timing]: Does LDA (indirect),Y take 6 cycles if a page boundary IS crossed? ;;;
-	INC <currentSubTest
+	JSR TEST_InstructionTiming_EvenOverhead
 	LDA #$FF
 	STA <Test_UnOp_IndirectPointerLo
 	STA <Test_UnOp_IndirectPointerHi
@@ -5767,6 +5805,7 @@ TEST_InstructionTiming:
 	INC <currentSubTest
 	
 	;;; Test 9 [Instruction Timing]: Does JMP take 3 cycles? ;;;
+	JSR TEST_InstructionTiming_OddOverhead
 	JSR SyncTo1000CyclesUntilNMI
 	JMP TEST_InstructionTimingContinue
 	; I thought it was clever to jump around the fail condition while testing how long a JMP instruction takes.
@@ -5782,7 +5821,7 @@ TEST_InstructionTimingContinue:
 	INC <currentSubTest
 
 	;;; Test A [Instruction Timing]: Does LDA (indirect,X) take 6 cycles? ;;;
-	INC <currentSubTest
+	JSR TEST_InstructionTiming_EvenOverhead
 	LDA #$FF
 	JSR SyncTo1000CyclesUntilNMI
 	LDX #$FF	  ; This take 2 cycles
@@ -5848,6 +5887,7 @@ TEST_InstructionTimingRTS:
 	INC <currentSubTest
 
 	;;; Test E [Instruction Timing]: Does PHA take 3 cycles? ;;;
+	JSR TEST_InstructionTiming_OddOverhead
 	JSR SyncTo1000CyclesUntilNMI
 	PHA
 	JSR $500 ; run timing test.
@@ -5858,6 +5898,7 @@ TEST_InstructionTimingRTS:
 	INC <currentSubTest
 	
 	;;; Test F [Instruction Timing]: Does PLA take 4 cycles? ;;;
+	JSR TEST_InstructionTiming_EvenOverhead
 	PHA
 	JSR SyncTo1000CyclesUntilNMI
 	PLA
@@ -5868,6 +5909,7 @@ TEST_InstructionTimingRTS:
 	INC <currentSubTest
 
 	;;; Test G [Instruction Timing]: Does PHP take 3 cycles? ;;;
+	JSR TEST_InstructionTiming_OddOverhead
 	JSR SyncTo1000CyclesUntilNMI
 	PHP
 	JSR $500 ; run timing test.
@@ -5878,6 +5920,7 @@ TEST_InstructionTimingRTS:
 	INC <currentSubTest
 	
 	;;; Test H [Instruction Timing]: Does PLP take 4 cycles? ;;;
+	JSR TEST_InstructionTiming_EvenOverhead
 	PHP
 	JSR SyncTo1000CyclesUntilNMI
 	PLP
@@ -6246,6 +6289,9 @@ TEST_NmiAndBrk_Prep:
 	RTS
 ;;;;;;;
 
+	.bank 2	; If I don't do this, the ROM won't compile.
+	.org $C000
+
 TEST_NmiAndBrk:
 	JSR TEST_NmiAndBrk_Prep
 	;;; Test 1 [NMI and BRK]: What happens when the NMI runs during a BRK instruction? (Error 1 means BRK didn't skip the following byte) ;;;
@@ -6316,8 +6362,7 @@ TEST_NmiAndBrkAnswerLoop2:
 FAIL_NmiAndBrk:
 	JMP TEST_Fail
 	
-	.bank 2	; If I don't do this, the ROM won't compile.
-	.org $C000
+
 TEST_NmiAndBrkAnswerKey:   
 	.byte $27, $37, $37, $36, $37, $26, $27, $26, $27, $26, $27, $24, $25, $24, $25, $24, $25, $24, $25, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
 	.byte $37, $00, $00, $00, $00, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36, $37, $36
@@ -6544,6 +6589,24 @@ FAIL_RMW2007:
 	JSR WaitForVBlank
 	JSR SetUpDefaultPalette
 	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+
+TEST_APU_LengthCounter:
+	SEI	; make sure interrupts are disabled.
+    LDA #$40  ; mode 0, interrupt disabled
+    STA $4017
+    LDA #$01  ; enable square 1
+    STA $4015
+    LDA #$10  ; unhalt length
+    STA $4000
+    LDA #$7f  ; sweep off
+    STA $4001
+    LDA #$ff  ; period
+    STA $4002
+	;;; Test 1 [APU Length Counter]: Writing to the length counter of an audio channel will begin playing the channel ;;;
+	
+
+
 	
 
 
