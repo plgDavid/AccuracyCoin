@@ -980,7 +980,7 @@ TEST_DummyReads:
 	LDX #$62
 	JSR Clockslide_29780 ; Wait a frame so the VBlank flag gets set
 	LDA $3FF0, X ; Dummy read $3F52 (A mirror of $2002), then read $4052 (Open bus emulation is NOT needed to pass this test!)
-	LDA $2002	 ; ; If bit 7 of A gets set, then the dummy read was from the wrong address (bit 7 of $2002 was not cleared by the dummy read).
+	LDA $2002	 ; If bit 7 of A gets set, then the dummy read was from the wrong address (bit 7 of $2002 was not cleared by the dummy read).
 	BMI TEST_Fail2
 	INC <currentSubTest 	
 	
@@ -5381,8 +5381,8 @@ TEST_APURegActivation:
 	; However, with the APU registers active, the OAM DMA will be able to read from the APU registers and their mirrors.
 	; Here's the values that are expected to be put in OAM by this DMA.
 	;
-	; 	   00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
-	; 	 ┌─────────────────────────────────────────────────┐
+	;      00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
+	;    ┌─────────────────────────────────────────────────┐
 	; 00 │ 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 │ ; The value of $40 is left over from the data bus.
 	; 10 │ 40 40 40 40 40 44 41 40 40 40 40 40 40 40 40 40 │ ; The $40's are the left over data bus. The value of $44 is the frame interrupt flag + the triangle channel from reading address $4015 (APU Status).
 	; 20 │ 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 │ ; Referring to the above line, the $41 is open bus + reading controller 1, and $40 is open bus + controller 2. (this line is just open bus)
@@ -5399,7 +5399,7 @@ TEST_APURegActivation:
 	; D0 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
 	; E0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
 	; F0 │ 00 00 00 00 00 04 01 00 00 00 00 00 00 00 00 00 │
-	; 	 └─────────────────────────────────────────────────┘
+	;    └─────────────────────────────────────────────────┘
 
 	; Step 1: Set up the IRQ function
 	LDA #$68	;PLA
@@ -6592,6 +6592,7 @@ FAIL_RMW2007:
 ;;;;;;;;;;;;;;;;;
 
 TEST_APU_LengthCounter:
+
 	SEI	; make sure interrupts are disabled.
     LDA #$40  ; mode 0, interrupt disabled
     STA $4017
