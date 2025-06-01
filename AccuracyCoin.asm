@@ -83,6 +83,7 @@ suitePointerList = $80
 
 suiteExecPointerList = $A0
 
+Reserved_C8 = $C8; For my "unofficial opcodes are correct length" tests, I use [Two-Byte-Opcode][INY], and then check the value of Y. Since INY is $E8, I'd like to avoid corrupting something stored in byte C8.
 
 PPUCTRL_COPY = $F0
 PPUMASK_COPY = $F1
@@ -222,7 +223,12 @@ result_NmiAndIrq = $463
 
 result_RMW2007 = $464
 
-result_APU_LengthCounter = $465
+result_APULengthCounter = $465
+result_APULengthTable = $466
+result_FrameCounterIRQ = $467
+result_FrameCounter4Step = $468
+result_FrameCounter5Step = $469
+
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -387,7 +393,7 @@ TableTable:
 	.word Suite_UnofficialOps_Immediates
 	.word Suite_CPUInterrupts
 	.word Suite_DMATests
-	.word Suite_APUCounter
+	.word Suite_APUTiming
 	.word Suite_PowerOnState
 	.word Suite_PPUTiming
 	.word Suite_SpriteZeroHits
@@ -528,7 +534,7 @@ Suite_UnofficialOps_Immediates:
 	table "$AB   LXA Immediate", $FF, result_UnOp_LXA_AB, TEST_LXA_AB
 	table "$CB   AXS Immediate", $FF, result_UnOp_AXS_CB, TEST_AXS_CB
 	table "$EB   SBC Immediate", $FF, result_UnOp_SBC_EB, TEST_SBC_EB
-	table "Print magic values", $FF, result_UnOp_Magic, TEST_MAGIC
+	table "Print magic values",  $FF, result_UnOp_Magic, TEST_MAGIC
 	.byte $FF
 	
 	
@@ -538,6 +544,17 @@ Suite_CPUInterrupts:
 	table "Interrupt flag latency", $FF, result_IFlagLatency, TEST_IFlagLatency
 	table "NMI Overlap BRK", $FF, result_NmiAndBrk, TEST_NmiAndBrk
 	table "NMI Overlap IRQ", $FF, result_NmiAndIrq, TEST_NmiAndIrq
+	.byte $FF
+	
+	;; APU Timing ;;
+Suite_APUTiming:
+	.byte "APU Timing", $FF
+	table "Length Counter", $FF, result_APULengthCounter, TEST_APULengthCounter
+	table "Length Table", $FF, result_APULengthTable, TEST_APULengthTable
+	table "Frame Counter IRQ", $FF, result_FrameCounterIRQ, TEST_FrameCounterIRQ
+	table "Frame Counter 4-step", $FF, result_FrameCounter4Step, TEST_FrameCounter4Step
+	table "Frame Counter 5-step", $FF, result_FrameCounter5Step, TEST_FrameCounter5Step
+
 	.byte $FF
 	
 	;; DMA Tests ;;
@@ -550,13 +567,7 @@ Suite_DMATests:
 	table "Controller Strobing", $FF, result_ControllerStrobing, TEST_ControllerStrobing
 	table "APU Register Activation", $FF, result_APURegActivation, TEST_APURegActivation
 	.byte $FF
-	
-	;; APU Counters ;;
-Suite_APUCounter:
-	.byte "APU Counters", $FF
-	table "Length Counter", $FF, result_APU_LengthCounter, TEST_APU_LengthCounter
-	.byte $FF
-	
+
 	;; Power On State ;;
 Suite_PowerOnState:
 	.byte "Power On State", $FF
@@ -594,7 +605,7 @@ Suite_SpriteZeroHits:
 	;; PPU Misc ;;
 Suite_PPUMisc:
 	.byte "PPU Misc.", $FF
-	table "RMW $2007", $FF, result_RMW2007, TEST_RMW2007
+	table "RMW $2007 Extra Write", $FF, result_RMW2007, TEST_RMW2007
 	;table "Palette Corruption", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 
@@ -1806,6 +1817,89 @@ TEST_Fail6:	; This is in the middle of the test, since it saves bytes to branch 
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
 
+TEST_VerifyInstructionIsOneByte:
+	LDA <Copy_A ; the opcode
+	STA $5C0
+	LDA #$60
+	STA $5C1
+	STA $5C3
+	LDA #Reserved_C8	; It's just the value $C8
+	STA $5C2
+	LDA #$50
+	STA <Reserved_C8
+	STA <Reserved_C8+1
+	LDX #0
+	LDY #0
+	JSR $5C0
+	CPY #0
+	BNE FAIL_WrongInstructionSize
+	LDA <Copy_A ; the opcode
+	RTS
+
+TEST_VerifyInstructionIsTwoByte:
+	LDA <Copy_A ; the opcode
+	STA $5C0
+	LDA #Reserved_C8	; It's just the value $C8
+	STA $5C1
+	LDA #$60
+	STA $5C2
+	LDA #$50
+	STA <Reserved_C8
+	STA <Reserved_C8+1
+	LDX #0
+	LDY #0
+	JSR $5C0
+	CPY #0
+	BNE FAIL_WrongInstructionSize
+	LDA <Copy_A ; the opcode
+	RTS
+	
+TEST_VerifyInstructionIsThreeByte:
+	LDX #0
+TEST_VerifyInstructionIsThreeLoop:
+	LDA TEST_UnOp_ThreeByte_RamFunc, X
+	STA $5C0,X
+	INX
+	CPX #$E
+	BNE TEST_VerifyInstructionIsThreeLoop
+	LDA <Copy_A ; the opcode
+	STA $5C6
+	LDA #$50
+	STA <Reserved_C8
+	STA <Reserved_C8+1
+	LDX #0
+	LDY #0
+	JSR $5C0
+	CPY #0
+	BNE FAIL_WrongInstructionSize
+	LDA <Copy_A ; the opcode
+	RTS
+
+FAIL_WrongInstructionSize:	; We need to pull 4 different return addresses off the stack.
+	PLA
+	PLA
+	PLA
+	PLA
+	PLA
+	PLA
+	PLA
+	PLA
+	LDA #2	; Error code 0.
+	RTS
+
+TEST_UnOp_ThreeByte_RamFunc:
+	TSX
+	STX $7FF
+	LDX #0
+	NOP
+	INY
+	INY
+	LDX $7FF
+	TXS
+	RTS
+;;;;;;
+
+
 TEST_UnOp_RamFunc: ; this gets copy/pasted into RAM at address $0580
 	NOP	; These can be replaced with a JSR instruction.
 	NOP	; Certain operations have different behavior if a DMA occurs in the 2nd to last cycle.
@@ -1946,6 +2040,7 @@ TEST_UnOp_SetupAddrMode_Implied:
 TEST_UnOp_SetupAddrMode_Immediate:
 	LDA Test_UnOp_ValueAtAddressForTest
 	STA UnOpTest_Operand
+	JSR TEST_VerifyInstructionIsTwoByte
 	RTS
 
 TEST_UnOp_SetupAddrMode_IndX:
@@ -1962,6 +2057,7 @@ TEST_UnOp_SetupAddrMode_IndX:
 	LDY #0
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsTwoByte
 	RTS
 
 TEST_UnOp_SetupAddrMode_IndY:
@@ -1982,6 +2078,7 @@ TEST_UnOp_IndY_DontDecHigh
 	LDY #0
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsTwoByte
 	RTS
 
 TEST_UnOp_SetupAddrMode_ZP:
@@ -2002,6 +2099,7 @@ TEST_UnOp_SetupAddrMode_ZP:
 	STA [Test_UnOp_OperandTargetAddrLo],Y
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsTwoByte
 	RTS
 
 TEST_UnOp_SetupAddrMode_ZPX:
@@ -2024,6 +2122,7 @@ TEST_UnOp_SetupAddrMode_ZPX:
 	LDY #0
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsTwoByte
 	RTS
 
 TEST_UnOp_SetupAddrMode_ZPY:
@@ -2045,6 +2144,7 @@ TEST_UnOp_SetupAddrMode_ZPY:
 	LDY #0
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsTwoByte
 	RTS
 ;;;;;;;
 TEST_UnOp_SetupAddrMode_Abs:
@@ -2059,6 +2159,7 @@ TEST_UnOp_SetupAddrMode_Abs:
 	STA [Test_UnOp_OperandTargetAddrLo],Y
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsThreeByte
 	RTS
 ;;;;;;;
 TEST_UnOp_SetupAddrMode_AbsX:
@@ -2079,6 +2180,7 @@ TEST_UnOp_AbsX_DontDecHigh
 	STA [Test_UnOp_OperandTargetAddrLo],Y
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsThreeByte
 	RTS
 TEST_UnOp_SetupAddrMode_AbsY:
 	STY <Copy_Y
@@ -2096,6 +2198,7 @@ TEST_UnOp_AbsY_DontDecHigh
 	STA [Test_UnOp_OperandTargetAddrLo],Y
 	STA [Test_UnOp_ExpectedResultAddrLo],Y
 	LDY <Copy_Y
+	JSR TEST_VerifyInstructionIsThreeByte
 	RTS
 ;;;;;;;
 
@@ -2775,6 +2878,16 @@ TEST_ISC:
 TEST_SHA_93:
 	LDA #PostDMACyclesUntilTestInstruction+3
 	STA <Test_UnOp_CycleDelayPostDMA	
+	; Since we need to run this instruction to determine the behavior *before* running a series of tests, let's first confirm this instruction's length in bytes.
+	; This is SHA (Indirect),Y, which is 2 bytes long.
+	LDX #0
+	.byte $93, $E8
+	CPX #0
+	BEQ  TEST_SHA_93_CorrectLength
+	LDA #2	; error code 0.
+	RTS
+	
+TEST_SHA_93_CorrectLength:
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
 	LDA #$FF
 	STA <$00 ; For checking behavior 1
@@ -2806,6 +2919,17 @@ TEST_SHA_Behavior1_93_JMP:
 TEST_SHA_9F:
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
+	; Since we need to run this instruction to determine the behavior *before* running a series of tests, let's first confirm this instruction's length in bytes.
+	; This is SHA Absolute, which is 3 bytes long.
+	LDX #0
+	.byte $9F, $E8, $E8
+	CPX #0
+	BEQ  TEST_SHA_9F_CorrectLength
+	LDA #2	; error code 0.
+	RTS
+	
+TEST_SHA_9F_CorrectLength:
+	
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
 	LDA #$FF
 	STA <$00 ; For checking behavior 1
@@ -2852,7 +2976,18 @@ TEST_SHA_Behavior1:
 	JSR PrintTextCentered
 	.word $22B0
 	.byte " SHA Behavior 1", $FF
+	JSR PrintTextCentered
+	.word $2330
+	.byte "SHA magic = $", $FF
+	LDA #$FF
+	LDX #$00
+	LDY #$60
+	.byte $9F, $F0, $FE ; SHA $FEF0, Y
+	LDA <$50
+	JSR PrintByte
+	
 	JSR ResetScrollAndWaitForVBlank
+
 	PLA
 
 	JSR TEST_UnOp_Setup; Set the opcode
@@ -3018,6 +3153,22 @@ TEST_SHS_9B:
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
+		; Since we need to run this instruction to determine the behavior *before* running a series of tests, let's first confirm this instruction's length in bytes.
+	; This is SHS Absolute, which is 3 bytes long.
+	TSX
+	STX <Copy_SP
+	LDX #0
+	.byte $9B, $E8, $E8
+	CPX #0
+	BEQ  TEST_SHS_9B_CorrectLength
+	LDX <Copy_SP
+	TXS
+	LDA #2	; error code 0.
+	RTS
+	
+TEST_SHS_9B_CorrectLength:
+	LDX <Copy_SP
+	TXS
 	LDA #$FF
 	STA <$00 ; For checking behavior 1
 	STA $0A00 ; For checking behavior 2
@@ -3050,6 +3201,19 @@ TEST_SHS_Behavior1_9B:
 	JSR PrintTextCentered
 	.word $22D0
 	.byte " SHS Behavior 1", $FF
+	JSR PrintTextCentered
+	.word $2350
+	.byte "SHS magic = $", $FF
+	TSX
+	STX <Copy_SP
+	LDA #$FF
+	LDX #$00
+	LDY #$60
+	.byte $9B, $F0, $FE ; SHS $FEF0, Y
+	LDX <Copy_SP
+	TXS
+	LDA <$50
+	JSR PrintByte
 	JSR ResetScrollAndWaitForVBlank
 
 	LDA #$9B
@@ -3322,18 +3486,18 @@ TEST_LAE_BB:
 	.byte $4A, $4A, $00, (flag_i | flag_v), $4A
 
 	JSR TEST_RunTest_AddrInitAXYFS
-	.word $5C3
+	.word $5E3
 	.byte $C3
 	.byte $7C, $99, $52, (flag_i), $9A
-	.word $5C3
+	.word $5E3
 	.byte $C3
 	.byte $82, $82, $52, (flag_i | flag_n), $82
 	
 	JSR TEST_RunTest_AddrInitAXYFS
-	.word $5C3
+	.word $5E3
 	.byte $04
 	.byte $AB, $CD, $EF, (flag_i | flag_c | flag_n), $90
-	.word $5C3
+	.word $5E3
 	.byte $04
 	.byte $00, $00, $EF, (flag_i | flag_c | flag_z), $00 ;
 	; NOTE: Yes, the stack pointer will be set to 00;
@@ -3548,6 +3712,23 @@ TEST_MAGIC:
 	; The ANE and LXA instructions have "magic values".
 	; The value is typically $EE or $FF.
 	; This test just prints what the value is for both instructions.	
+	; First, let's confirm the instructions are 2 bytes long.
+	LDX #0
+	.byte $8B, $E8
+	CPX #0
+	BEQ TEST_MAGIC_Continue
+	LDA #2 ; error code 0
+	RTS
+	
+TEST_MAGIC_Continue:
+	LDA #$FF
+	.byte $AB, $E8
+	CPX #1
+	BNE TEST_MAGIC_Continue2
+	LDA #2 ; error code 0
+	RTS
+	
+TEST_MAGIC_Continue2:
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
@@ -4277,6 +4458,7 @@ TEST_Sprite0Hit_Behavior:
 	BNE TEST_Sprite0Hit_Behavior_Continued ; branch always around this fail condition.
 	
 FAIL_Sprite0Hit_Behavior:
+	JSR ClearOverscanNametable
 	JSR WaitForVBlank
 	JSR DisableRendering_S
 	JSR EnableRendering_BG
@@ -4334,7 +4516,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	JSR Clockslide_500 ; wait a few more scanlines just to be sure.
 	LDA $2002	; Bit 6 should NOT be set, since the sprite zero hit should not have occured.
 	AND #$40
-	BNE FAIL_Sprite0Hit_Behavior
+	BNE FAIL_Sprite0Hit_Behavior2
 	INC <currentSubTest
 
 	;;; Test D [Sprite Zero Hit Behavior]: Sprite Zero Hit test with a sprite that isn't a solid 8x8 square. ;;;
@@ -4389,6 +4571,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	AND #$40
 	BEQ FAIL_Sprite0Hit_Behavior2	
 	;; END OF TEST ;;
+	JSR ClearOverscanNametable
 	LDA #1
 	RTS
 ;;;;;;;
@@ -4545,6 +4728,7 @@ Address2004_SpriteZeroTest:     ; I also re-use this code in the $2004 behavior 
 	BEQ FAIL_ArbitrarySpriteZero; Same as above. If bit 6 was zero, the sprite zero hit did not occur, thus failing the test.
 	
 	;; END OF TEST ;;
+	JSR ClearOverscanNametable
 	LDA #1
 	RTS
 ;;;;;;;
@@ -4553,6 +4737,7 @@ FAIL_ArbitrarySpriteZero:
 FAIL_SprOverflow:
 FAIL_MisalignedOAM:
 FAIL_Address2004:
+	JSR ClearOverscanNametable
 	JSR WaitForVBlank
 	JSR DisableRendering_S
 	JSR EnableRendering_BG
@@ -4622,6 +4807,7 @@ SprOverflow_Prep1:
 	INC <currentSubTest		
 
 	;; END OF TEST ;;
+	JSR ClearOverscanNametable
 	LDA #1
 	RTS
 ;;;;;;;
@@ -4929,6 +5115,7 @@ TEST_MisalignedOAM_P4_3_Loop:
 	BEQ FAIL_MisalignedOAM_Behavior1
 	
 	;; END OF TEST ;;
+	JSR ClearOverscanNametable
 	JSR DisableRendering_S
 	LDA #1
 	RTS
@@ -5097,6 +5284,10 @@ MisalignedOAM_LUT_Off3:
 	; $00, $80, $FF, $FF
 
 FAIL_Address2004_Behavior:
+	JSR ClearPage2
+	JSR WaitForVBlank
+	LDA #2
+	STA $4014
 	JMP FAIL_Address2004
 
 TEST_Address2004_Behavior:
@@ -5269,13 +5460,15 @@ TEST_Address2004_Behavior_loop:			; Set up page 2 so every value is essentially 
 	BEQ FAIL_Address2004_Behavior1	; Since it's inconsistent between CPU/PPU clock alignments, (and probably different on different consolre revisions) we'll simply just check that it isn't FF.
 
 	;; END OF TEST ;;
+	JSR ClearOverscanNametable
+	JSR ClearPage2
 	JSR WaitForVBlank
+	LDA #2
+	STA $4014
 	JSR DisableRendering_S
 	LDA #1
 	RTS
 ;;;;;;;
-
-
 
 FAIL_APURegActivation_Pre:
 	LDA #1
@@ -5574,10 +5767,20 @@ TEST_DMA_Plus_4016R_Loop:
 	JSR ReadController1
 	LDA <controller
 	ASL A
+	STA <$51
 	ORA #1
 	CMP <$50
-	BNE FAIL_DMA_Plus_4016R
+	BNE DMA_Plus_4016R_TryFamicomControllerBehavior
 
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+DMA_Plus_4016R_TryFamicomControllerBehavior:
+	LDA <$51
+	ORA #7
+	CMP <$50
+	BNE FAIL_DMA_Plus_4016R
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -5939,6 +6142,9 @@ FAIL_InstructionTiming2:
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
 
+	.bank 2	; If I don't do this, the ROM won't compile.
+	.org $C000
+
 TEST_IFlagLatency_IRQ:
 	STX <$50
 	LDA #0	
@@ -6289,9 +6495,6 @@ TEST_NmiAndBrk_Prep:
 	RTS
 ;;;;;;;
 
-	.bank 2	; If I don't do this, the ROM won't compile.
-	.org $C000
-
 TEST_NmiAndBrk:
 	JSR TEST_NmiAndBrk_Prep
 	;;; Test 1 [NMI and BRK]: What happens when the NMI runs during a BRK instruction? (Error 1 means BRK didn't skip the following byte) ;;;
@@ -6488,6 +6691,7 @@ FAIL_NmiAndIqr:
 
 TEST_RMW2007:
 	;;; Test 1 [RMW $2007]: Does a Read-Modify-Write instruction to address $2007 perform an extra write? ;;;
+	; This behavior only applies to RP2C02G PPU's and later.
 	; This behavior only seems to be consistent if the nametable in which the test is occuring is *all zeroes*.
 	; To be more specific, there's probably going to be 3 writes:
 	;	-1) The write at "v", which is different depending on console/PPU revisions. (I can't in good consience test for this one, considering the different console behavior)
@@ -6589,27 +6793,703 @@ FAIL_RMW2007:
 	JSR WaitForVBlank
 	JSR SetUpDefaultPalette
 	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;	
+
+TEST_APU_Prep:
+	SEI	; we don't want any interrupts occuring.
+	LDA #$40
+    STA $4017	; Disable the frame counter IRQ's
+    LDA #$01
+    STA $4015	; Enable pulse 1 channel.
+    LDA #$10
+    STA $4000	; Don't infinitely play pulse 1 channel. (and set the volume to be constantly the minimum.)
+    LDA #$7f
+    STA $4001	; Disable the sweep.
+    LDA #$ff
+    STA $4002	; Set Pulse 1's Timer Low to the maximum value.
+	RTS
+;;;;;;;
+
+FAIL_APULengthCounter:
+	LDA #$00
+    STA $4015	; disable all audio channels.
+	JMP TEST_Fail
+
+TEST_APULengthCounter:
+	; Special thanks to blargg. I pretty much just copied all of their APU tests, with a few minor changes and additions here and there.
+	JSR TEST_APU_Prep
+	
+	;;; Test 1 [APU Length Counter]: The pulse 1 channel isn't playing yet. ;;;
+	LDA $4015
+	BNE FAIL_APULengthCounter
+	INC <currentSubTest
+
+	;;; Test 2 [APU Length Counter]: Writing to $4003 will start playing audio. ;;;
+	LDA #$18
+	STA $4003
+	LDA $4015
+	CMP #1	; The pulse 1 channel should now be playing.
+	BNE FAIL_APULengthCounter ; Otherwise, fail the test!
+	INC <currentSubTest
+	
+	;;; Test 3 [APU Length Counter]: The audio will in-fact stop playing if we wait long enough. ;;;
+	LDX #15
+TEST_APULengthCounter_DelayQuarterSecondLoop:	; Let's wait for 15 frames. About 1/4th of a second.
+	JSR Clockslide_29780
+	DEX
+	BNE TEST_APULengthCounter_DelayQuarterSecondLoop
+	LDA $4015
+	BNE FAIL_APULengthCounter ; The pulse 1 channel should no longer be playing.
+	INC <currentSubTest
+
+	;;; Test 4 [APU Length Counter]: Writing $80 to $4017 will immediately clock the Length Counter. ;;;
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2. (The upper 5 bits of a value written to $4003 sets the length counter from a value in a look-up-table.)
+	; This Look-up-table is the focus of the Length Table test. But for now, let's just assume at least the length of 2 is emulated.
+	LDA #$80
+	STA $4017 ; Use the 5-step Frame Counter mode. Writing this value clocks the length counters, which now equals 1.
+	STA $4017 ; This clocks it again, so it now equals zero. And just like that, the pulse 1 channel is no longer playing audio.
+	LDA $4015
+	BNE FAIL_APULengthCounter ; The pulse 1 channel should no longer be playing.
+	INC <currentSubTest
+
+	;;; Test 5 [APU Length Counter]: Writing $00 to $4017 will not clock the Length Counter. ;;;
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$00
+	STA $4017 ; This doesn't clock the length counters.
+	STA $4017 ; This doesn't clock the length counters.
+	LDA $4015
+	CMP #1
+	BNE FAIL_APULengthCounter ; The pulse 1 channel should still be playing.
+	INC <currentSubTest
+
+	;;; Test 6 [APU Length Counter]: Disabling the audio channel will immediately clear the length counter to zero. ;;;
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #0
+	STA $4015 ; stop playing the pulse 1 channel.
+	LDA #1
+	STA $4015 ; enable the pulse 1 channel agian.
+	LDA $4015 ; The length counter was reset, so the pulse 1 channel isn't playing.
+	BNE FAIL_APULengthCounter1
+	INC <currentSubTest
+
+	;;; Test 7 [APU Length Counter]: The length counter cannot be set when the channel is disabled. ;;;
+	LDA #0
+	STA $4015 ; stop playing the pulse 1 channel.
+	LDA #$18
+	STA $4003 ; Length would be 2, but the channel is disabled, so the length is 0.
+	LDA #1
+	STA $4015 ; enable the pulse 1 channel agian.
+	LDA $4015 ; The pulse 1 channel isn't playing.
+	BNE FAIL_APULengthCounter1
+	INC <currentSubTest
+	
+	;;; Test 8 [APU Length Counter]: If the channel is set to play infinitely, it won't clock the length counter. ;;;
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$30
+	STA $4000 ; loop channel infinitely
+	LDA #$80
+	STA $4017 ; Attempt to clock the counter.
+	STA $4017 ; This doesn't work since it's playing infinitely.
+	LDA #$10
+	STA $4000 ; stop looping channel infinitely. The counters should still be 2.
+	LDA $4015
+	CMP #1
+	BNE FAIL_APULengthCounter1 ; The pulse 1 channel should still be playing.
+	INC <currentSubTest
+	
+	;;; Test 9 [APU Length Counter]: If the channel is set to play infinitely, the length counter is left unchanged. ;;;
+	; For the most part, I just copied what blargg did for this entire test.
+	; I added an extra test here at the end, since I can imagine an emulator setting the length counter to be something like, $FF every APU cycle in which it's set to loop forever.
+	; That's certainly *a way* to make it last forever, but it's not what actually happens, so let's test for that.
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$30
+	STA $4000 ; loop channel infinitely
+	LDA #$80
+	STA $4017 ; Attempt to clock the counter.
+	STA $4017 ; This doesn't work since it's playing infinitely.
+	LDA #$10
+	STA $4000 ; stop looping channel infinitely. The counters should still be 2.
+	LDA #$80
+	STA $4017 ; Attempt to clock the counter.
+	STA $4017 ; It actually will work this time.
+	LDA $4015
+	BNE FAIL_APULengthCounter1 ; The pulse 1 channel should no longer be playing.
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_APULengthCounter1:
+FAIL_APULengthTable:
+	LDA #$00
+    STA $4015	; disable all audio channels.
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+	
+TEST_APULengthTable:
+	JSR TEST_APU_Prep
+	;;; Test 1 [APU Length Table]: What value was the length counter when we write 'n' to address $4003? ;;;
+	; Just for clarification, this is actually "Test 1" through "Test W". They all use the same routine, but the error code is adjusted accordingly.
+	LDX #0
+TEST_APULengthTableLoop:
+	TXA
+	ASL A
+	ASL A
+	ASL A ; The upper five bits of A are now the iteration into this loop.
+	PHA
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	PLA
+	STA $4003 ; Reset the length counter with the next value for the test.
+	LDY #0
+TEST_APULengthTable_UpdateCounterLoop:
+	LDA #$80
+	STA $4017 ; Clock the length counter.
+	INY
+	LDA $4015	; Check if pulse 1 is still playing.
+	BNE TEST_APULengthTable_UpdateCounterLoop ; Loop until it stops.
+	; And just like that, we know the value of the length Table, which is now stored in Y.
+	TYA
+	CMP TEST_APULengthTable_AnswerKey, X
+	BNE FAIL_APULengthTable
+	INC <currentSubTest
+	INX
+	CPX #32
+	BNE TEST_APULengthTableLoop
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+	
+TEST_APULengthTable_AnswerKey:
+	.byte 10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
+
+FAIL_FrameCounterIRQ:
+	LDA #$40
+	STA $4017	; disable the IRQ flag.
+	JMP TEST_Fail
+
+TEST_FrameCounterIRQ:
+	SEI
+	;;; Test 1 [APU Frame Counter IRQ]: The IRQ flag is set when the APU Frame counter is in the 4-step mode, and the IRQ flag is enabled. ;;;
+	LDA #$00	
+	STA $4017	; 4-step mode, enable IRQ
+	JSR Clockslide_30000 ; wait long enough that the IRQ flag would be set.
+	LDA $4015
+	BEQ FAIL_FrameCounterIRQ
+	INC <currentSubTest
+
+	;;; Test 2 [APU Frame Counter IRQ]: The IRQ flag is not set when the APU Frame counter is in the 4-step mode, and the IRQ flag is disabled. ;;;
+	LDA #$40
+	STA $4017	; 4-step mode, disable IRQ
+	JSR Clockslide_30000 ; wait long enough that the IRQ flag would be set.
+	LDA $4015
+	BNE FAIL_FrameCounterIRQ
+	INC <currentSubTest
+	
+	;;; Test 3 [APU Frame Counter IRQ]: The IRQ flag is not set when the APU Frame counter is in the 5-step mode, and the IRQ flag is enabled. ;;;
+	LDA #$80
+	STA $4017	; 5-step mode, enable IRQ (it doesn't happen in 5-step mode)
+	JSR Clockslide_30000 ; wait long enough that the IRQ flag would be set.
+	LDA $4015
+	BNE FAIL_FrameCounterIRQ
+	INC <currentSubTest
+	
+	;;; Test 4 [APU Frame Counter IRQ]: The IRQ flag is not set when the APU Frame counter is in the 5-step mode, and the IRQ flag is disabled. ;;;
+	LDA #$C0
+	STA $4017	; enable the frame counter IRQ, and use the 5-step mode.
+	JSR Clockslide_30000 ; wait long enough that the IRQ flag would be set.
+	LDA $4015
+	BNE FAIL_FrameCounterIRQ
+	INC <currentSubTest
+	
+	;;; Test 5 [APU Frame Counter IRQ]: Reading the IRQ flag clears the IRQ flag. ;;;
+	LDA #$00	
+	STA $4017	; 4-step mode, enable IRQ
+	JSR Clockslide_30000 ; wait long enough that the IRQ flag would be set.
+	LDA $4015 ; read it, clearing it
+	LDA $4015 ; read it again, but it's already cleared.
+	BNE FAIL_FrameCounterIRQ
+	INC <currentSubTest
+
+	;;; Test 6 [APU Frame Counter IRQ]: Changing the Frame Counter to 5-step mode after the flag was set does not clear the flag. ;;;
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ
+	JSR Clockslide_30000 ; wait long enough that the IRQ flag would be set.
+	LDA #$80
+	STA $4017 ; 5-step mode, enable IRQ
+	LDA $4015 ; read the IRQ flag, which will still be set.
+	BEQ FAIL_FrameCounterIRQ
+	INC <currentSubTest
+	
+	;;; Test 7 [APU Frame Counter IRQ]: Disabling the IRQ flag will clear the IRQ flag. ;;;
+	LDA #$00	
+	STA $4017	; 4-step mode, enable IRQ
+	JSR Clockslide_30000 ; wait long enough that the IRQ flag would be set.
+	LDA #$40
+	STA $4017 ; clear the IRQ flag.
+	LDA $4015 ; read the IRQ flag, which will no longer be set.
+	BNE FAIL_FrameCounterIRQ
+	INC <currentSubTest
+	
+	;;; Test 8 [APU Frame Counter IRQ]: Test the timing of the IRQ flag. (see if it's set too early) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	; the flag should be enabled in 29830 CPU cycles.
+	; So let's stall for 29826 cycles, and read $4015 to see if the flag was set. That should be 1 cycle too early.
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_26
+	LDA $4015 ; If the flag *is* set, it was set too early, so you fail the test.
+	BNE FAIL_FrameCounterIRQ2
+	INC <currentSubTest
+
+	;;; Test 9 [APU Frame Counter IRQ]: Test the timing of the IRQ flag. (see if it's set on the right CPU cycle) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	; the flag should be enabled in 29830 CPU cycles.
+	; So let's stall for 29827 cycles, and read $4015 to see if the flag was set. That should be 1 cycle too early.
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_27
+	LDA $4015 ; If the flag is *not* set, it was set too late, so you fail the test.
+	BEQ FAIL_FrameCounterIRQ2
+	INC <currentSubTest
+
+	;;; Test A [APU Frame Counter IRQ]: Test the timing of the IRQ flag. (If the write occurs on an even CPU cycle, the IRQ is delayed by 1 CPU cycle) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA <$00  ; sync with odd CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an even cycle when writing that, so the frame counter is reset in 4 CPU cycles.)
+	; the flag should be enabled in 29831 CPU cycles.
+	; So let's stall for 29827 cycles, and read $4015 to see if the flag was set. That should be 1 cycle too early.
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_27
+	LDA $4015 ; If the flag *is* set, it was set too early, so you fail the test.
+	BNE FAIL_FrameCounterIRQ2
+	INC <currentSubTest
+
+	;;; Test B [APU Frame Counter IRQ]: Test the timing of the IRQ flag. (see if it's set on the correct cycle) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA <$00  ; sync with odd CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an even cycle when writing that, so the frame counter is reset in 4 CPU cycles.)
+	; the flag should be enabled in 29831 CPU cycles.
+	; So let's stall for 29828 cycles, and read $4015 to see if the flag was set. That should be *the* cycle it gets set.
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_28
+	LDA $4015 ; If the flag is *not* set, it was set too late, so you fail the test.
+	BEQ FAIL_FrameCounterIRQ2
+	INC <currentSubTest
+	BNE TEST_FrameCounterIRQ_Continue
+	
+FAIL_FrameCounterIRQ2:
+	LDA #$40
+	STA $4017	; disable the IRQ flag.
+	JMP TEST_Fail
+	
+TEST_FrameCounterIRQ_Continue:
+	;;; Test C [APU Frame Counter IRQ]: Reading $4015 on the same cycle the IRQ flag is set, will not clear the IRQ flag (it gets set again on the following 2 CPU cycles) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA <$00  ; sync with odd CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an even cycle when writing that, so the frame counter is reset in 4 CPU cycles.)
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_27
+	LDA $4015 ; Read on the same cycle the IRQ flag is set.
+	LDA $4015 ; Read again! But it won't be cleared, since the IRQ flag gets set again.
+	BEQ FAIL_FrameCounterIRQ2
+	INC <currentSubTest
+	
+	;;; Test D [APU Frame Counter IRQ]: Reading $4015 on the cycle after the IRQ flag is set, will not clear the IRQ flag (it gets set again on the following CPU cycle) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA <$00  ; sync with odd CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an even cycle when writing that, so the frame counter is reset in 4 CPU cycles.)
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_28
+	LDA $4015 ; Read on the same cycle the IRQ flag is set.
+	LDA $4015 ; Read again! But it won't be cleared, since the IRQ flag gets set again.
+	BEQ FAIL_FrameCounterIRQ2
+	INC <currentSubTest
+	
+	;;; Test E [APU Frame Counter IRQ]: Reading $4015 2 cycles after the IRQ flag is set, will not clear the IRQ flag (it gets set again on this CPU cycle) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA <$00  ; sync with odd CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an even cycle when writing that, so the frame counter is reset in 4 CPU cycles.)
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_29
+	LDA $4015 ; Read on the same cycle the IRQ flag is set.
+	LDA $4015 ; Read again! But it won't be cleared, since the IRQ flag gets set again.
+	BEQ FAIL_FrameCounterIRQ2
+	INC <currentSubTest
+	
+	;;; Test F [APU Frame Counter IRQ]: Reading $4015 3 cycles after the IRQ flag is set, will clear the IRQ flag (it does not get set again on this CPU cycle) ;;;
+	JSR WaitForVBlank
+	LDA #02
+	STA $4014 ; sync with even CPU cycle
+	LDA <$00  ; sync with odd CPU cycle
+	LDA #$40
+	STA $4017 ; 4-step mode, clear IRQ flag
+	LDA #$00	
+	STA $4017 ; 4-step mode, enable IRQ (The CPU was on an even cycle when writing that, so the frame counter is reset in 4 CPU cycles.)
+	JSR Clockslide_29700
+	JSR Clockslide_100
+	JSR Clockslide_30
+	LDA $4015 ; Read on the same cycle the IRQ flag is set.
+	LDA $4015 ; Read again! But it will be cleared.
+	BNE FAIL_FrameCounterIRQ3
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_FrameCounterIRQ3:
+	LDA #$40
+	STA $4017	; disable the IRQ flag.
+	JMP TEST_Fail
+
+FAIL_FrameCounter4Step:
+	LDA #$00
+    STA $4015	; disable all audio channels.
+	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
 
-TEST_APU_LengthCounter:
-
-	SEI	; make sure interrupts are disabled.
-    LDA #$40  ; mode 0, interrupt disabled
-    STA $4017
-    LDA #$01  ; enable square 1
-    STA $4015
-    LDA #$10  ; unhalt length
-    STA $4000
-    LDA #$7f  ; sweep off
-    STA $4001
-    LDA #$ff  ; period
-    STA $4002
-	;;; Test 1 [APU Length Counter]: Writing to the length counter of an audio channel will begin playing the channel ;;;
+TEST_FrameCounter4Step:
+	JSR TEST_APU_Prep
+	;;; Test 1 [APU Frame Counter 4-Step Mode]: Verify the timing of the first clock (read 1 cycle early. It's still going) ;;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$80
+	STA $4017 ; Manually clock the pulse 1 length counter.
+	LDA #$40
+	STA $4017 ; 4-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the first time the length counters get clocked is in 14912 CPU cycles.
+	JSR Clockslide_14900 ; 12 cycles to go.
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	NOP ; 4 cycles
+	LDA $4015 ; the pulse channel should still be playing for 1 more cycle.
+	BEQ FAIL_FrameCounter4Step
+	INC <currentSubTest
 	
-
-
+	;;; Test 2 [APU Frame Counter 4-Step Mode]: Verify the timing of the first clock  (Read the cycle it stops);;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$80
+	STA $4017 ; Manually clock the pulse 1 length counter.
+	LDA #$40
+	STA $4017 ; 4-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the first time the length counters get clocked is in 14912 CPU cycles.
+	JSR Clockslide_14900 ; 12 cycles to go.
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	LDA <$00 ; 3 cycle to go
+	LDA $4015 ; the pulse channel should have stopped just before you read.
+	BNE FAIL_FrameCounter4Step
+	INC <currentSubTest
 	
+	;;; Test 3 [APU Frame Counter 4-Step Mode]: Verify the timing of the second clock (read 1 cycle early. It's still going) ;;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$40
+	STA $4017 ; 4-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the first time the length counters get clocked is in 29829 CPU cycles.
+	JSR Clockslide_29820 ; 9 cycles to go.
+	NOP ; 7 cycles to go
+	LDA <$00 ; 4
+	LDA $4015 ; the pulse channel should still be playing for 1 more cycle.
+	BEQ FAIL_FrameCounter4Step
+	INC <currentSubTest
+	
+	;;; Test 4 [APU Frame Counter 4-Step Mode]: Verify the timing of the second clock (Read the cycle it stops);;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$40
+	STA $4017 ; 4-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the first time the length counters get clocked is in 29829 CPU cycles.
+	JSR Clockslide_29820 ; 9 cycles to go.
+	NOP ; 7 cycles to go
+	NOP ; 5
+	NOP ; 3 cycles to go
+	LDA $4015 ; the pulse channel should have stopped just before you read.
+	BNE FAIL_FrameCounter4Step2
+	INC <currentSubTest
+	
+	;;; Test 5 [APU Frame Counter 4-Step Mode]: Verify the timing of the third clock (read 1 cycle early. It's still going) ;;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$28
+	STA $4003 ; Length = 4.
+	LDA #$80
+	STA $4017 ; Manually clock the pulse 1 length counter.
+	LDA #$40
+	STA $4017 ; 4-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the third time the length counters get clocked is in 44742 CPU cycles.
+	JSR Clockslide_44730 ; 12 cycles to go.
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6
+	NOP ; 4 cycles
+	LDA $4015 ; the pulse channel should still be playing for 1 more cycle.
+	BEQ FAIL_FrameCounter4Step2
+	INC <currentSubTest
+	
+	;;; Test 6 [APU Frame Counter 4-Step Mode]: Verify the timing of the third clock  (Read the cycle it stops);;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$28
+	STA $4003 ; Length = 4.
+	LDA #$80
+	STA $4017 ; Manually clock the pulse 1 length counter.
+	LDA #$40
+	STA $4017 ; 4-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the third time the length counters get clocked is in 44742 CPU cycles.
+	JSR Clockslide_44730 ; 12 cycles to go.
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6
+	LDA <$00 ; 3 cycle to go
+	LDA $4015 ; the pulse channel should have stopped just before you read.
+	BNE FAIL_FrameCounter4Step2	
+	; And at this point, the frame counter has already looped, so there's no need to test further.
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
 
+FAIL_FrameCounter4Step2:
+FAIL_FrameCounter5Step:
+	LDA #$00
+    STA $4015	; disable all audio channels.
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+
+TEST_FrameCounter5Step:
+	JSR TEST_APU_Prep
+	;;; Test 1 [APU Frame Counter 5-Step Mode]: Verify the timing of the first clock (read 1 cycle early. It's still going) ;;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$80  ; This upcoming write will clock it once, then we just need to wait for the second clock.
+	STA $4017 ; 5-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the first time the length counters get clocked is in 14912 CPU cycles.
+	JSR Clockslide_14900 ; 12 cycles to go.
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	NOP ; 4 cycles
+	LDA $4015 ; the pulse channel should still be playing for 1 more cycle.
+	BEQ FAIL_FrameCounter5Step
+	INC <currentSubTest
+	
+	;;; Test 2 [APU Frame Counter 5-Step Mode]: Verify the timing of the first clock  (Read the cycle it stops);;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$18
+	STA $4003 ; Length = 2.
+	LDA #$80  ; This upcoming write will clock it once, then we just need to wait for the second clock.
+	STA $4017 ; 5-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the first time the length counters get clocked is in 14912 CPU cycles.
+	JSR Clockslide_14900 ; 12 cycles to go.
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	LDA <$00 ; 3 cycle to go
+	LDA $4015 ; the pulse channel should have stopped just before you read.
+	BNE FAIL_FrameCounter5Step
+	INC <currentSubTest
+	
+	;;; Test 3 [APU Frame Counter 5-Step Mode]: Verify the timing of the second clock (read 1 cycle early. It's still going) ;;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$28
+	STA $4003 ; Length = 4.
+	LDA #$80  ; This upcoming write will clock it once, then we just need to wait for the second clock.
+	STA $4017 ; clock it an extra time.
+	STA $4017 ; 5-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the second time the length counters get clocked is in 37280 CPU cycles.
+	JSR Clockslide_37270 ; 10 cycles to go.
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	NOP ; 4 cycles
+	LDA $4015 ; the pulse channel should still be playing for 1 more cycle.
+	BEQ FAIL_FrameCounter5Step
+	INC <currentSubTest
+	
+	;;; Test 4 [APU Frame Counter 5-Step Mode]: Verify the timing of the second clock  (Read the cycle it stops);;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$28
+	STA $4003 ; Length = 4.
+	LDA #$80  ; This upcoming write will clock it once, then we just need to wait for the second clock.
+	STA $4017 ; clock it an extra time.
+	STA $4017 ; 5-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the second time the length counters get clocked is in 37280 CPU cycles.
+	JSR Clockslide_37270 ; 10 cycles to go.
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	LDA <$00 ; 3 cycle to go
+	LDA $4015 ; the pulse channel should have stopped just before you read.
+	BNE FAIL_FrameCounter5Step2
+	INC <currentSubTest
+	
+	;;; Test 5 [APU Frame Counter 5-Step Mode]: Verify the timing of the third clock (read 1 cycle early. It's still going) ;;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$28
+	STA $4003 ; Length = 4.
+	LDA #$80  ; This upcoming write will clock it once, then we just need to wait for the second clock.
+	STA $4017 ; 5-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the third time the length counters get clocked is in 52194 CPU cycles.
+	JSR Clockslide_52180 ; 14 cycles to go.
+	NOP ; 12 cycles to go
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	LDA $4015 ; the pulse channel should still be playing for 1 more cycle.
+	BEQ FAIL_FrameCounter5Step2
+	INC <currentSubTest
+	
+	;;; Test 6 [APU Frame Counter 5-Step Mode]: Verify the timing of the third clock  (Read the cycle it stops);;;
+	LDA #2
+	STA $4014
+	;CPU is synced with even CPU cycle
+	LDA #0
+	STA $4017 ; Reset the frame counter.
+	LDA #$28
+	STA $4003 ; Length = 4.
+	LDA #$80  ; This upcoming write will clock it once, then we just need to wait for the second clock.
+	STA $4017 ; 5-step mode, disable IRQ (The CPU was on an odd cycle when writing that, so the frame counter is reset in 3 CPU cycles.)
+	LDA <$00  ; stall for 3 CPU cycles.
+	; Okay, the third time the length counters get clocked is in 52194 CPU cycles.
+	JSR Clockslide_52180 ; 14 cycles to go.
+	NOP ; 12 cycles to go
+	NOP ; 10 cycles to go
+	NOP ; 8 cycles to go
+	NOP ; 6 cycles to go
+	LDA <$00 ; 3 cycle to go
+	LDA $4015 ; the pulse channel should have stopped just before you read.
+	BNE FAIL_FrameCounter5Step2
+
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_FrameCounter5Step2:
+	LDA #$00
+    STA $4015	; disable all audio channels.
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                ENGINE                   ;;
@@ -7317,7 +8197,7 @@ DrawTEST:	; This will print "TEST", "PASS", "FAIL x" or "...." depending on if t
 	TXA
 	AND #$3
 	CMP #2 ; check if we failed.
-	BNE DrawTestEnd
+	BNE DrawTESTEraseErrorCode
 	; we failed, so print an error code.
 	LDA #$24
 	STA $2007
@@ -7325,12 +8205,18 @@ DrawTEST:	; This will print "TEST", "PASS", "FAIL x" or "...." depending on if t
 	AND #$FC
 	LSR A
 	LSR A
+DrawTESTEnd:
 	STA $2007	
-DrawTestEnd:
 	LDY <$FE
 	LDX <$FD
 	RTS
+DrawTESTEraseErrorCode:
+	LDA #$24
+	STA $2007
+	BNE DrawTESTEnd
 ;;;;;;;
+
+
 
 UpdateTESTAttributes: ; This will update the attributes for the test results "PASS", or "FAIL x", so they can be colored differently.
 	STY <$FE
@@ -7915,6 +8801,29 @@ ClearNTFrom2240Loop:
 	RTS
 ;;;;;;;
 
+ClearOverscanNametable:	; some tests draw tiles in the overscan area of the first nametable. This clears that.
+	JSR WaitForVBlank
+	JSR SetPPUADDRFromWord
+	.byte $20, $00
+	LDA #$24
+	LDX #$32
+ClearOverscanNametableLoop1:
+	STA $2007
+	DEX
+	BNE ClearOverscanNametableLoop1
+	JSR SetPPUADDRFromWord
+	.byte $23, $A0
+	LDA #$24
+	LDX #32
+ClearOverscanNametableLoop2:
+	STA $2007
+	DEX
+	BNE ClearOverscanNametableLoop2
+	JSR ResetScroll
+	RTS
+;;;;;;;
+
+
 PrintByte:	; Takes the A register and prints each nybble seperately as two characters on the nametable at the current "v" address.
 	; This doesn't make any stack shenanigans.
 	PHA
@@ -8192,198 +9101,181 @@ CRAICPUC_NMI: ; Convert Return Address Into CPU Cycles NMI Routine
 	; It's just a subroutine that wastes a precise amount of CPU cycles.
 	; If you want to waste exactly n cycles, run JSR Clockslide_n
 	; (Clockslide_14 through Clockslide_50 are defined, and most larger clockslides are a combination of JSRs to those clockslides)
-Clockslide_100:       ;=6
-	JSR Clockslide_38 ;=44
-	JSR Clockslide_50 ;=94
-	RTS			      ;=100
+
+Clockslide_100Minus12: ; This is very handy for the following clockslides I want to make. 100, 200, etc.
+	JSR Clockslide_26 ;=32
+	JSR Clockslide_50 ;=80
+	RTS			      ;=100-12. Remember, JSR and RTS add 12 cycles, so to make clockslide 100, I just need to JSR somewhere with JSR Clockslide_100Minus12
 ;;;;;;;
-Clockslide_500:        ;=6
-	JSR Clockslide_38  ;=44
-	JSR Clockslide_50  ;=94
-	JSR Clockslide_100 ;=194
-	JSR Clockslide_100 ;=294
-	JSR Clockslide_100 ;=394
-	JSR Clockslide_100 ;=494
-	RTS			       ;=500
-;;;;;;;
-Clockslide_3000:       ;=6
-	JSR Clockslide_38  ;=44
-	JSR Clockslide_50  ;=94
-	JSR Clockslide_100 ;=194
-	JSR Clockslide_100 ;=294
-	JSR Clockslide_100 ;=394
-	JSR Clockslide_100 ;=494
-	JSR Clockslide_500 ;=0994
-	JSR Clockslide_500 ;=1494
-	JSR Clockslide_500 ;=1994
-	JSR Clockslide_500 ;=2494
-	JSR Clockslide_500 ;=2994
-	RTS			       ;=3000
+
+Clockslide_50000:
+	JSR Clockslide_10000
+Clockslide_40000:
+	JSR Clockslide_10000
+Clockslide_30000:
+	JSR Clockslide_10000
+Clockslide_20000:
+	JSR Clockslide_10000
+Clockslide_10000:
+	JSR Clockslide_1000
+Clockslide_9000:
+	JSR Clockslide_1000
+Clockslide_8000:
+	JSR Clockslide_1000
+Clockslide_7000:
+	JSR Clockslide_1000
+Clockslide_6000:
+	JSR Clockslide_1000
+Clockslide_5000:
+	JSR Clockslide_1000
+Clockslide_4000:
+	JSR Clockslide_1000
+Clockslide_3000:
+	JSR Clockslide_1000
+Clockslide_2000:
+	JSR Clockslide_1000
+Clockslide_1000:
+	JSR Clockslide_100
+Clockslide_900:
+	JSR Clockslide_100
+Clockslide_800:
+	JSR Clockslide_100
+Clockslide_700:
+	JSR Clockslide_100
+Clockslide_600:
+	JSR Clockslide_100
+Clockslide_500:
+	JSR Clockslide_100
+Clockslide_400:
+	JSR Clockslide_100
+Clockslide_300:
+	JSR Clockslide_100
+Clockslide_200:
+	JSR Clockslide_100
+Clockslide_100:      
+	JSR Clockslide_100Minus12 ; Since JSR and RTS take 12 cycles, let's stall for exactly 100-12 cycles.
+	RTS
 ;;;;;;;
 
 ;A frame has about 29780 cycles, so let's make a few around that number.
-Clockslide_29700:		;=6
-	JSR Clockslide_38 	;=44
-	JSR Clockslide_50	;=94
-	JSR Clockslide_100	;=194
-	JSR Clockslide_500	;=694
-	JSR Clockslide_500	;=1194
-	JSR Clockslide_500	;=1694
-	JSR Clockslide_500	;=2194
-	JSR Clockslide_500	;=2694
-	JSR Clockslide_3000	;=5694
-	JSR Clockslide_3000	;=8694
-	JSR Clockslide_3000	;=11694
-	JSR Clockslide_3000	;=14694
-	JSR Clockslide_3000	;=17694
-	JSR Clockslide_3000	;=20694
-	JSR Clockslide_3000	;=23694
-	JSR Clockslide_3000	;=26694
-	JSR Clockslide_3000	;=29694
-	RTS					;=29750
+Clockslide_29700:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_600	;700
+	JSR Clockslide_9000 ;9700
+	JSR Clockslide_20000;29700
+	RTS
 ;;;;;;;
-Clockslide_29750:		;=6
-	JSR Clockslide_38 	;=44
-	JSR Clockslide_100	;=144
-	JSR Clockslide_100	;=244
-	JSR Clockslide_500	;=744
-	JSR Clockslide_500	;=1244
-	JSR Clockslide_500	;=1744
-	JSR Clockslide_500	;=2244
-	JSR Clockslide_500	;=2744
-	JSR Clockslide_3000	;=5744
-	JSR Clockslide_3000	;=8744
-	JSR Clockslide_3000	;=11744
-	JSR Clockslide_3000	;=14744
-	JSR Clockslide_3000	;=17744
-	JSR Clockslide_3000	;=20744
-	JSR Clockslide_3000	;=23744
-	JSR Clockslide_3000	;=26744
-	JSR Clockslide_3000	;=29744
-	RTS					;=29750
+Clockslide_29750:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_600	;750
+	JSR Clockslide_9000 ;9750
+	JSR Clockslide_20000;29750
+	RTS
 ;;;;;;;
-Clockslide_29749:		;=6
-	JSR Clockslide_37 	;=43
-	JSR Clockslide_100	;=143
-	JSR Clockslide_100	;=243
-	JSR Clockslide_500	;=743
-	JSR Clockslide_500	;=1243
-	JSR Clockslide_500	;=1743
-	JSR Clockslide_500	;=2243
-	JSR Clockslide_500	;=2743
-	JSR Clockslide_3000	;=5743
-	JSR Clockslide_3000	;=8743
-	JSR Clockslide_3000	;=11743
-	JSR Clockslide_3000	;=14743
-	JSR Clockslide_3000	;=17743
-	JSR Clockslide_3000	;=20743
-	JSR Clockslide_3000	;=23743
-	JSR Clockslide_3000	;=26743
-	JSR Clockslide_3000	;=29743
-	RTS					;=29749
+Clockslide_29780:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_30	;180
+	JSR Clockslide_600	;780
+	JSR Clockslide_9000 ;9780
+	JSR Clockslide_20000;29780
+	RTS
 ;;;;;;;
-Clockslide_29780:		;=6
-	JSR Clockslide_18	;=24
-	JSR Clockslide_29750;=29774
-	RTS					;=29780
+Clockslide_29776:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_26	;176
+	JSR Clockslide_600	;776
+	JSR Clockslide_9000 ;9776
+	JSR Clockslide_20000;29776
+	RTS
 ;;;;;;;
-Clockslide_29776:		;=6
-	JSR Clockslide_14	;=20
-	JSR Clockslide_29750;=29770
-	RTS					;=29776
-;;;;;;;
-Clockslide_2269:		;=6
-	JSR Clockslide_500	;=506
-	JSR Clockslide_500	;=1006
-	JSR Clockslide_500	;=1506
-	JSR Clockslide_500	;=2006
-	JSR Clockslide_100	;=2106
-	JSR Clockslide_100	;=2206
-	JSR Clockslide_40	;=2246
-	JSR Clockslide_17	;=2263
-	RTS					;=2269
+Clockslide_2269:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_19	;169
+	JSR Clockslide_100	;269
+	JSR Clockslide_2000 ;2269
+	RTS
 ;;;;;;;
 
-Clockslide_2252:		;=6
-	JSR Clockslide_500	;=506
-	JSR Clockslide_500	;=1006
-	JSR Clockslide_500	;=1506
-	JSR Clockslide_500	;=2006
-	JSR Clockslide_100	;=2106
-	JSR Clockslide_100	;=2206
-	JSR Clockslide_40	;=2246
-	RTS					;=2252
+Clockslide_2252:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	NOP					;152
+	JSR Clockslide_100	;252
+	JSR Clockslide_2000 ;2252
+	RTS
 ;;;;;;;
 
-Clockslide_2032:       ;=6
-	NOP
-	NOP
-	JSR Clockslide_500 ;=514
-	JSR Clockslide_500 ;=1014
-	JSR Clockslide_500 ;=1514
-	JSR Clockslide_500 ;=2014
-	JSR Clockslide_16  ;=2030
-	RTS			       ;=2036
+Clockslide_2032:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_32	;132
+	JSR Clockslide_900	;1032
+	JSR Clockslide_1000 ;2032
+	RTS
 ;;;;;;;
 
-Clockslide_2381:	   ;=6
-	JSR Clockslide_500 ;=506
-	JSR Clockslide_500 ;=1006
-	JSR Clockslide_500 ;=1506
-	JSR Clockslide_100 ;=1606
-	JSR Clockslide_100 ;=1706
-	STA $FFFF		   ;=1710
-	STA $FFFF		   ;=1714
-	STA <$00		   ;=1717
-	RTS			       ;=1723
-;;;;;;;
-
-Clockslide_1830:	   ;=6
-	JSR Clockslide_500 ;=506
-	JSR Clockslide_500 ;=1006
-	JSR Clockslide_500 ;=1506
-	JSR Clockslide_100 ;=1606
-	JSR Clockslide_100 ;=1706
-	JSR Clockslide_100 ;=1806
-	JSR Clockslide_18  ;=1824
-	RTS			       ;=1830
+Clockslide_1830:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_30	;130
+	JSR Clockslide_700	;830
+	JSR Clockslide_1000	;1830
+	RTS
 ;;;;;;;
 
 Clockslide_1816:	   ;=6
-	JSR Clockslide_500 ;=506
-	JSR Clockslide_500 ;=1006
-	JSR Clockslide_500 ;=1506
-	JSR Clockslide_100 ;=1606
-	JSR Clockslide_100 ;=1706
-	JSR Clockslide_100 ;=1806
-	NOP				   ;=1808
-	NOP				   ;=1810
-	RTS			       ;=1816
+	JSR Clockslide_100Minus12
+	JSR Clockslide_16	;116
+	JSR Clockslide_700	;816
+	JSR Clockslide_1000	;1816
+	RTS
 ;;;;;;;
 
-Clockslide_28780:		;=6
-	JSR Clockslide_38 	;=44
-	JSR Clockslide_100	;=144
-	JSR Clockslide_100	;=244
-	JSR Clockslide_500	;=744
-	JSR Clockslide_500	;=1244
-	JSR Clockslide_500	;=1744
-	JSR Clockslide_500	;=2244
-	JSR Clockslide_500	;=2744
-	JSR Clockslide_500	;=3244
-	JSR Clockslide_500	;=3744
-	JSR Clockslide_500	;=4244
-	JSR Clockslide_500	;=4744
-	JSR Clockslide_3000	;=7744
-	JSR Clockslide_3000	;=10744
-	JSR Clockslide_3000	;=13744
-	JSR Clockslide_3000	;=16744
-	JSR Clockslide_3000	;=19744
-	JSR Clockslide_3000	;=22744
-	JSR Clockslide_3000	;=25744
-	JSR Clockslide_3000	;=28744
-	JSR Clockslide_30   ;=29774
-	RTS					;=29780
+Clockslide_14900:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_800	;900
+	JSR Clockslide_4000 ;4900
+	JSR Clockslide_10000;14900
+	RTS
+;;;;;;;
+
+Clockslide_29820:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_20	;120
+	JSR Clockslide_700	;820
+	JSR Clockslide_9000 ;9820
+	JSR Clockslide_20000;29820
+	RTS
+;;;;;;;
+
+Clockslide_44730:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_30	;130
+	JSR Clockslide_600	;730
+	JSR Clockslide_4000 ;4730
+	JSR Clockslide_40000;44730
+	RTS
+;;;;;;;
+
+Clockslide_37270:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_20	;170
+	JSR Clockslide_100	;270
+	JSR Clockslide_7000 ;7270
+	JSR Clockslide_30000;37270
+	RTS
+;;;;;;;
+
+Clockslide_52180:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_30	;180
+	JSR Clockslide_2000 ;2180
+	JSR Clockslide_50000;52180
+	RTS
 ;;;;;;;
 
 
@@ -8479,6 +9371,7 @@ DMASync40_Loop:
 DMASyncButSlightlyLessReliable:
 	; This fuction *should* exit with exactly 406 CPU cycles until the DMA occurs. It does on my console, but not so much for various emulators.
 	; But hey, this one doesn't rely on open bus, and won't infinite loop.
+	LDX #0
 	LDA #$80
 	STA $4010 ; Enable DMC IRQ
 	LDA #$00
@@ -8489,7 +9382,7 @@ DMASyncButSlightlyLessReliable:
 	NOP
 	STA $4015 ; Enable DMC a second time.
 sync_dmc_loop:
-	BIT $4015
+	LDA $4015
 	BNE sync_dmc_loop ; wait for DMC Interrupt
 	NOP
 	NOP
@@ -8499,8 +9392,8 @@ sync_dmc_loop:
 sync_dmc_wait:
 	LDA #$E3
 sync_dmc_first:
-	NOP
-	NOP
+	INX
+	BEQ sync_dmc_Fail	; This will certainly not loop 256 times, unless your timing is way off.
 	NOP
 	NOP
 	SEC
@@ -8508,9 +9401,9 @@ sync_dmc_first:
 	BNE sync_dmc_first
 	LDA #$10
 	STA $4015
-	NOP
-	BIT $4015
+	LDA $4015
 	BNE sync_dmc_wait
+
 	; The DMA is now synced!
 	LDA <Copy_A ; waste 3 cycles
 	LDA <Copy_A ; waste 3 cycles
@@ -8545,6 +9438,13 @@ sync_dmc_loop2:
 	RTS				  ; 412 -> 406
 	; the next DMA is at (432) cycles, so we have 406 cycles to go.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+sync_dmc_Fail: ; This is to prevent an infinite loop for an emulator that hasn't implemented the DMC DMA stuff, or is just off on the timing.
+	; Well, if you amde it here, the test was going to fail anyway, let's be honest.
+	; Just RTS.
+	RTS
+;;;;;;;
+
 
 	.org $FF00
 Clockslide:
@@ -8707,15 +9607,15 @@ VblSync: ;
 	LDA #0
 	STA $2000	
 
-	BIT $2002
+	LDA $2002
 VblSync_Loop1:    
-	BIT $2002
+	LDA $2002
 	BPL VblSync_Loop1
 	
 	JSR Clockslide_29750
 	JSR Clockslide_21	
 
-	BIT $2002
+	LDA $2002
 	BMI VblSync_skip4
 	LDA $0000	;+4 cycles
 VblSync_skip4:
@@ -8724,13 +9624,13 @@ VblSync_skip4:
 ;;;;;;;;;;;;;;;;;;;;;
 
 	.org $FFC0
-	; 17 00s. This will be the DPCM "audio sample" played during the loop. It should just be silence.
+	; 17 00s. This will be the DPCM "audio sample" played during the CMD DMA Sync loop. It should just be silence.
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 
 VblSync_Loop2:
 	JSR Clockslide_16
-	BIT $2002
-	BIT $2002
+	LDA $2002
+	LDA $2002
 	BPL VblSync_Loop2
 	
 	PLA
