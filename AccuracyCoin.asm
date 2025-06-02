@@ -9382,7 +9382,7 @@ DMASyncButSlightlyLessReliable:
 	NOP
 	STA $4015 ; Enable DMC a second time.
 sync_dmc_loop:
-	LDA $4015
+	BIT $4015
 	BNE sync_dmc_loop ; wait for DMC Interrupt
 	NOP
 	NOP
@@ -9401,7 +9401,7 @@ sync_dmc_first:
 	BNE sync_dmc_first
 	LDA #$10
 	STA $4015
-	LDA $4015
+	BIT $4015
 	BNE sync_dmc_wait
 
 	; The DMA is now synced!
