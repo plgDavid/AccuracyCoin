@@ -230,6 +230,7 @@ result_FrameCounter4Step = $468
 result_FrameCounter5Step = $469
 result_DeltaModulationChannel = $470
 result_DMABusConflict = $471
+result_DMA_Plus_OpenBus = $472
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -562,6 +563,7 @@ Suite_APUTiming:
 	;; DMA Tests ;;
 Suite_DMATests:
 	.byte "APU Registers and DMA tests", $FF	
+	table "DMA + Open Bus", $FF, result_DMA_Plus_OpenBus, TEST_DMA_Plus_OpenBus
 	table "DMA + $2007 Read", $FF, result_DMA_Plus_2007R, TEST_DMA_Plus_2007R
 	table "DMA + $2007 Write", $FF, result_DMA_Plus_2007W, TEST_DMA_Plus_2007W
 	table "DMA + $4015 Read", $FF, result_DMA_Plus_4015R, TEST_DMA_Plus_4015R
@@ -3754,6 +3756,20 @@ TEST_MAGIC_Continue2:
 	JSR ResetScroll
 	LDA #1
 	RTS
+
+TEST_DMA_Plus_OpenBus:
+	JSR DMASync_50CyclesRemaining	; sync DMA
+	JSR Clockslide_47
+	LDA $4000 ; <------- [Opcode] [Operand1] [Operand2] [*DMA*] [Read]
+	BNE FAIL_DMA_Plus_OpenBus
+	
+	;; END OF TEST ;;
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_DMA_Plus_OpenBus:
+	JMP TEST_Fail
 
 TEST_DMA_Plus_2007_Prep:
 	JSR DisableRendering ; let's disable rendering for this one.
@@ -7817,7 +7833,7 @@ TEST_DeltaModulationChannelTestILoop:
 	JSR Clockslide_25
 	; Next DMA in 3 cycles
 TEST_DMC_OverflowLoop: ; DMA every 432 CPU cycles.
-	LDA $4000 ;+3 [DMA start] +5	Read from the DMC DMA's modification to the data bus. (There will be bus conflicts reading the controllers... but oh well.
+	LDA $4000 ;+3 [DMA start] +5	Read from the DMC DMA's modification to the data bus.
 	JSR Clockslide_400
 	JSR Clockslide_17	
 	INX	; +2   Increment X for the next loop.
@@ -7925,6 +7941,7 @@ TEST_DMABusConflict:
 	; Then, if the bus conflict happens, we can see that will well timed DMAs and open bus reads.
 	;
 	; Please don't press anything on controller 2 during this test. :)
+	; On that note, another firendly reminder that controller 1 has already been read 8 times before this test. I'm not bothering to re-strobe controllers here, plus having different results on controller 1 and 2 is useful.
 	
 	;;; Test 1 [DMA Bus Conflicts]: Check that the DMASync_50CyclesRemaining function works in this emulator ;;;	
 	JSR DMASync_50CyclesRemaining
@@ -7961,7 +7978,7 @@ TEST_DMABusConflict:
 	JSR Clockslide_19
 	; Next DMA in 3 cycles
 TEST_DMC_ConflictLoop: ; DMA every 432 CPU cycles.
-	LDA $4000 ;+3 [DMA start] +5	Read from the DMC DMA's modification to the data bus. (There will be bus conflicts reading the controllers... but oh well.
+	LDA $4000 ;+3 [DMA start] +5	Read from the DMC DMA's modification to the data bus.
 	STA $500, X
 	JSR Clockslide_400
 	LDA #$00
@@ -7983,9 +8000,21 @@ TEST_DMC_Conflict_AnswerLoop:
 	INX
 	CPX #$40
 	BNE TEST_DMC_Conflict_AnswerLoop
+	BEQ TEST_DMC_Test3
 	
+	LDX #0
+TEST_DMC_Conflict_AnswerLoop_Famicom:
+	LDA $500, X
+	CMP TEST_DMC_Conflicts_AnswerKey_Famicom, X
+	BNE FAIL_DMC_Conflicts
+	LDA #$00
+	STA $4017	; Keep the interrupt flag set, but refresh the timer.
+	INX
+	CPX #$40
+	BNE TEST_DMC_Conflict_AnswerLoop_Famicom
+	
+TEST_DMC_Test3:
 	;;; Test 3 [DMA Bus Conflicts]: The bus conflicts exist. ;;;
-
 	LDA $4015	; The bus conflict will read from $4015, clearing the frame counter's interrupt flag. 
 	AND #$40
 	BNE FAIL_DMC_Conflicts	; so if this is non-zero, the flag was still set, failing the test.
@@ -8001,12 +8030,18 @@ FAIL_DMC_Conflicts:
 ;;;;;;;;;;;;;;;;;
 	
 	.bank 3
-	.org $EF80
+	.org $EF40
 TEST_DMC_Conflicts_AnswerKey:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $00, $00, $00, $00, $00, $00, $01, $00, $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
 	.byte $FF, $FF, $FF, $FF, $FF, $FF, $E1, $E0, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+	
+TEST_DMC_Conflicts_AnswerKey_Famicom:
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $01, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+	.byte $FF, $FF, $FF, $FF, $FF, $FF, $F9, $F8, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
 
 	.org $EFC0
 TEST_DMC_ConflictsSample:
