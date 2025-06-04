@@ -7978,10 +7978,17 @@ TEST_DMC_Conflict_AnswerLoop:
 	LDA $500, X
 	CMP TEST_DMC_Conflicts_AnswerKey, X
 	BNE FAIL_DMC_Conflicts
+	LDA #$00
+	STA $4017	; Keep the interrupt flag set, but refresh the timer.
 	INX
 	CPX #$40
 	BNE TEST_DMC_Conflict_AnswerLoop
 	
+	;;; Test 3 [DMA Bus Conflicts]: The bus conflicts exist. ;;;
+
+	LDA $4015	; The bus conflict will read from $4015, clearing the frame counter's interrupt flag. 
+	AND #$40
+	BNE FAIL_DMC_Conflicts	; so if this is non-zero, the flag was still set, failing the test.
 	
 	LDA #$00
     STA $4015	; disable all audio channels.
