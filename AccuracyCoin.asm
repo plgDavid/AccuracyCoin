@@ -228,7 +228,8 @@ result_APULengthTable = $466
 result_FrameCounterIRQ = $467
 result_FrameCounter4Step = $468
 result_FrameCounter5Step = $469
-
+result_DeltaModulationChannel = $470
+result_DMABusConflict = $471
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -554,6 +555,7 @@ Suite_APUTiming:
 	table "Frame Counter IRQ", $FF, result_FrameCounterIRQ, TEST_FrameCounterIRQ
 	table "Frame Counter 4-step", $FF, result_FrameCounter4Step, TEST_FrameCounter4Step
 	table "Frame Counter 5-step", $FF, result_FrameCounter5Step, TEST_FrameCounter5Step
+	table "Delta Modulation Channel", $FF, result_DeltaModulationChannel, TEST_DeltaModulationChannel
 
 	.byte $FF
 	
@@ -566,6 +568,8 @@ Suite_DMATests:
 	table "DMA + $4016 Read", $FF, result_DMA_Plus_4016R, TEST_DMA_Plus_4016R
 	table "Controller Strobing", $FF, result_ControllerStrobing, TEST_ControllerStrobing
 	table "APU Register Activation", $FF, result_APURegActivation, TEST_APURegActivation
+	table "DMC DMA Bus Conflicts", $FF, result_DMABusConflict, TEST_DMABusConflict
+
 	.byte $FF
 
 	;; Power On State ;;
@@ -6144,6 +6148,10 @@ FAIL_InstructionTiming2:
 
 	.bank 2	; If I don't do this, the ROM won't compile.
 	.org $C000
+	
+	; and 33 00s in a row for a nice and neat silent DPCM sample.
+	.byte $00,  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+
 
 TEST_IFlagLatency_IRQ:
 	STX <$50
@@ -6811,6 +6819,7 @@ TEST_APU_Prep:
 ;;;;;;;
 
 FAIL_APULengthCounter:
+FAIL_AndDisableAudioChannels:
 	LDA #$00
     STA $4015	; disable all audio channels.
 	JMP TEST_Fail
@@ -6935,9 +6944,7 @@ TEST_APULengthCounter_DelayQuarterSecondLoop:	; Let's wait for 15 frames. About 
 
 FAIL_APULengthCounter1:
 FAIL_APULengthTable:
-	LDA #$00
-    STA $4015	; disable all audio channels.
-	JMP TEST_Fail
+	JMP FAIL_AndDisableAudioChannels
 ;;;;;;;;;;;;;;;;;
 	
 TEST_APULengthTable:
@@ -7202,9 +7209,7 @@ FAIL_FrameCounterIRQ3:
 	JMP TEST_Fail
 
 FAIL_FrameCounter4Step:
-	LDA #$00
-    STA $4015	; disable all audio channels.
-	JMP TEST_Fail
+	JMP FAIL_AndDisableAudioChannels
 ;;;;;;;;;;;;;;;;;
 
 TEST_FrameCounter4Step:
@@ -7347,9 +7352,7 @@ TEST_FrameCounter4Step:
 
 FAIL_FrameCounter4Step2:
 FAIL_FrameCounter5Step:
-	LDA #$00
-    STA $4015	; disable all audio channels.
-	JMP TEST_Fail
+	JMP FAIL_AndDisableAudioChannels
 ;;;;;;;;;;;;;;;;;
 
 TEST_FrameCounter5Step:
@@ -7486,18 +7489,530 @@ TEST_FrameCounter5Step:
 ;;;;;;;
 
 FAIL_FrameCounter5Step2:
+FAIL_DeltaModulationChannel:
+	JMP FAIL_AndDisableAudioChannels
+;;;;;;;;;;;;;;;;;
+
+TEST_DeltaModulationChannel:
+	; Special thanks to blargg, as I am pretty much just going to copy the test they wrote in 2005.
+	LDA #$00
+	STA $4012 ; Sample address $C000.
+	LDA #1
+	STA $4013 ; length of #1 * 16 + 1 = 17 bytes.
+	LDA #$0F
+	STA $4010 ; Fastest sample rate.
+	JSR Clockslide_4000
+
+	;;; Test 1 [APU Delta Modulation Channel]: Verify the DMC works ;;;
+	; In other words, if the DMC is playing audio, bit 4 of address $4015 will be set.
+	LDA #$10
+	STA $4015
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should be playing by now.
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel	; If bit 4 is not set, then fail the test.
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should have stopped by now.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel	; If bit 4 is still set, then fail the test.
+	INC <currentSubTest
+	
+	;;; Test 2 [APU Delta Modulation Channel]: Restarting the DMC should re-load the sample length. ;;;
+	LDA #$10
+	STA $4015
+	JSR Clockslide_4320 ; as we have established, the DMC is now playing.
+	LDA #$00
+	STA $4015
+	LDA #$10
+	STA $4015	; Restart the DMC! (The sample length should be reset to 17)
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should still be playing.
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel	; If bit 4 is not set (the sample ended), then fail the test.
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should have stopped by now.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel	; If bit 4 is still set, then fail the test.
+	INC <currentSubTest
+
+	;;; Test 3 [APU Delta Modulation Channel]: Writing $10 to $4015 should start palying a new sample if the previous one ended. ;;;
+	LDA #$10
+	STA $4015
+	JSR Clockslide_8640	; wait for sample to end.
+	STA $4015	; write $10 to $4015 again.
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should be playing.
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel
+	INC <currentSubTest
+	JSR Clockslide_4320
+	
+	;;; Test 4 [APU Delta Modulation Channel]: Writing $10 to $4015 while a sample is currently playing shouldn't affect anything. ;;;
+	; Keep in mind, in test 2 we disabled the DMC before writing $10, so the sample was no longer playing in that situation. We're not going to disable it in this test.
+	LDA #$10
+	STA $4015
+	JSR Clockslide_4320 ; as we have established, the DMC is now playing.
+	STA $4015	; Write $10 to $4015 again, while the sample is still playing. Nothing changes, don't reload the length or anything.
+	LDA $4015	; the DMC should still be playing.
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel2
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should have stopped by now.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel2
+	INC <currentSubTest
+	
+	;;; Test 5 [APU Delta Modulation Channel]: Writing $00 to $4015 will immediately stop the sample. ;;;
+	LDA #$10
+	STA $4015
+	JSR Clockslide_4320 ; as we have established, the DMC is now playing.
+	LDA #0
+	STA $4015	; Write $10 to $4015 again, while the sample is still playing. Nothing changes, don't reload the length or anything.
+	LDA $4015	; the DMC should still be playing.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel2
+	INC <currentSubTest
+
+	;;; Test 6 [APU Delta Modulation Channel]: Writing to $4013 doesn't change the sample length of the currently playing sample. ;;;
+	LDA #$10
+	STA $4015	; start the sample.
+	LDA #2
+	STA $4013	; 33 byte sample.	
+	JSR Clockslide_8640
+	LDA $4015	; the DMC should have stopped by now.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel2
+	; but now the length is 33.
+	LDA #$10
+	STA $4015
+	LDA #1
+	STA $4013	; set the sample size back to 17.
+	JSR Clockslide_12960
+	LDA $4015	; the DMC should still be playing.
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel2
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should have stopped by now.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel2
+	INC <currentSubTest
+
+	;;; Test 7 [APU Delta Modulation Channel]: The DMC IRQ Flag should not be set when disabled. ;;;
+	; Friendly reminder that in the prep before test 1, we run:
+	; LDA #$0F
+	; STA $4010
+	; which, in addition to using the fastest sample rate, disables the DMC IRQ.
+	LDA #$10
+	STA $4015 ; start sample.
+	JSR Clockslide_8640 ; wait for sample to end.
+	LDA $4015 ; Bit 7 (which sets the Negative flag) is set if the DMC IRQ flag is set.
+	BMI FAIL_DeltaModulationChannel2	; in this case, it should not be set.
+	INC <currentSubTest
+
+	;;; Test 8 [APU Delta Modulation Channel]: The DMC IRQ Flag should be set when enabled, and a sample ends. ;;;
+	SEI			; prevent IRQs from actually interrupting the CPU.
+	LDA #$8F	; enable the IRQ (and continue using the fastest rate)
+	STA $4010
+	LDA #$10
+	STA $4015 ; start sample.
+	JSR Clockslide_8640 ; wait for sample to end.
+	LDA $4015 ; Bit 7 (which sets the Negative flag) is set if the DMC IRQ flag is set.
+	BPL FAIL_DeltaModulationChannel2	; in this case, it should be set.
+	INC <currentSubTest
+	BNE FAIL_DeltaModulationChannelContinue ; branch around the fail condition.
+
+FAIL_DeltaModulationChannel2:
+	JMP FAIL_AndDisableAudioChannels
+
+FAIL_DeltaModulationChannelContinue:
+	;;; Test 9 [APU Delta Modulation Channel]: Reading $4015 does not clear the IRQ flag. ;;;
+	LDA $4015 ; Bit 7 should still be set.
+	BPL FAIL_DeltaModulationChannel2
+	INC <currentSubTest
+
+	;;; Test A [APU Delta Modulation Channel]: Writing to $4015 does clear the IRQ flag. ;;;
+	LDA #$10  ; Demonstrated by writing $10, but writing a zero will also clear the IRQ flag.
+	STA $4015
+	LDA $4015
+	BMI FAIL_DeltaModulationChannel2
+	LDA #$0
+	STA $4015
+	INC <currentSubTest
+
+	;;; Test B [APU Delta Modulation Channel]: Disabling the IRQ flag clears the IRQ flag. ;;;
+	LDA #$10
+	STA $4015 ; start sample.
+	JSR Clockslide_8640 ; wait for sample to end.
+	; As we have established in test 8, the IRQ flag is currently enabled.
+	LDA #$0F
+	STA $4010	; disable the IRQ flag.
+	LDA $4015
+	BMI FAIL_DeltaModulationChannel2
+	INC <currentSubTest
+
+	;;; Test C [APU Delta Modulation Channel]: Looping samples should loop. ;;;
+	; In other words, bit 4 of address $4015 will be set until you force the sample to stop.
+	LDA #$4F	; loop! (and the fastest sample rate)
+	STA $4010
+	LDA #$10
+	STA $4015
+	JSR Clockslide_50000 ; wait for a fairly long amount of time.
+	LDA $4015
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel2 ; it should still be playing, since it loops.
+	LDA #$00
+	STA $4015	; stopping the DMC should still stop the looping sample.
+	LDA $4015
+	AND #$10
+	BNE FAIL_DeltaModulationChannel2
+	INC <currentSubTest
+
+	;;; Test D [APU Delta Modulation Channel]: Looping samples should not set the IRQ flag. ;;;
+	LDA #$CF	; loop + enable IRQ flag! (and the fastest sample rate)
+	STA $4010
+	LDA #$10
+	STA $4015
+	JSR Clockslide_50000 ; wait for a fairly long amount of time.
+	LDA $4015
+	BMI FAIL_DeltaModulationChannel2 ; The IRQ flag is not set on looping samples.
+	STA $4015
+	LDA $4015	; Even if the sample is force-stopped, the IRQ flag is not set.
+	BMI FAIL_DeltaModulationChannel2
+	INC <currentSubTest
+
+	;;; Test E [APU Delta Modulation Channel]: Clearing the looping flag and then setting it again should keep the sample looping. ;;;
+	LDA #$10
+	STA $4015
+	JSR Clockslide_26352
+	LDA #$8F	; Disable loop
+	STA $4010
+	LDA #$CF
+	STA $4010	; enable loop again
+	JSR Clockslide_50000 ; wait for a fairly long amount of time.
+	LDA $4015
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel3 ; it should still be playing.
+	LDA #$00
+	STA $4015
+	INC <currentSubTest
+
+	;;; Test F [APU Delta Modulation Channel]: Clearing the looping flag will not immediately end the sample. The sample will then play for it's remaining bytes. ;;;
+	LDA #$10
+	STA $4015
+	JSR Clockslide_26352
+	LDA #$8F	; Disable loop
+	STA $4010
+	LDA $4015
+	BMI FAIL_DeltaModulationChannel3 ; The IRQ flag should not have been set.
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel3 ; it should still be playing.
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should have stopped by now.
+	BPL FAIL_DeltaModulationChannel3 ; The IRQ flag should have been set.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel3
+	INC <currentSubTest
+
+	;;; Test G [APU Delta Modulation Channel]: A looping sample will re-load the sample length from $4013 every time the sample loops. ;;;
+	LDA #$CF	; loop + enable IRQ flag! (and the fastest sample rate)
+	STA $4010
+	LDA #$10
+	STA $4015
+	JSR Clockslide_26352
+	LDA #02
+	STA $4013	; sample length is now 33.
+	JSR Clockslide_4320
+	LDA #$8F	; disable the loop
+	STA $4010
+	JSR Clockslide_10000
+	LDA $4015
+	BMI FAIL_DeltaModulationChannel3 ; The IRQ flag should not have been set.
+	AND #$10
+	BEQ FAIL_DeltaModulationChannel3 ; it should still be playing.
+	JSR Clockslide_4320
+	LDA $4015	; the DMC should have stopped by now.
+	BPL FAIL_DeltaModulationChannel3 ; The IRQ flag should have been set.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel3
+	INC <currentSubTest
+	BNE FAIL_DeltaModulationChannelC2 ; branch around another fail condition.
+
+FAIL_DeltaModulationChannel3:
+	JMP FAIL_AndDisableAudioChannels
+;;;;;;;;;;;;;;;;;
+	
+FAIL_DeltaModulationChannelC2:
+	;;; Test H [APU Delta Modulation Channel]: Writing $00 to $4013 should result in the following sample being 1 byte long. ;;;
+	LDA #$0F	; disable IRQ and loop.
+	STA $4010
+	LDA #0
+	STA $4013 ; 1-byte sample.
+	LDA #$10
+	STA $4015
+	JSR Clockslide_1728
+	LDA $4015	; the DMC should have stopped by now.
+	AND #$10
+	BNE FAIL_DeltaModulationChannel3
+	INC <currentSubTest
+
+	;;; Test I [APU Delta Modulation Channel]: There should be a one-byte buffer that's filled immediately if empty. ;;;
+	LDA #$8F
+	STA $4010
+	LDA #1
+	STA $4013	; 17 byte sample.
+	LDA #$10
+	STA $4015
+	LDA #$10
+TEST_DeltaModulationChannelTestILoop:
+	AND $4015	; Loop until the sample ends.
+	BNE TEST_DeltaModulationChannelTestILoop
+	JSR Clockslide_1728
+	JSR Clockslide_30
+	LDA #0
+	STA $4013	; 1 byte sample.
+	LDA #$10
+	STA $4015
+	LDA $4015
+	AND #$90	; The IRQ flag should be set, and the sample should have ended.
+	CMP #$80
+	BNE FAIL_DeltaModulationChannel3
+	LDA #$10
+	STA $4015	; we go again.
+	LDA $4015	
+	BEQ FAIL_DeltaModulationChannel3
+	; at this point we are playing audio.
+	JSR Clockslide_1728
+	; and now we aren't
+	LDA $4015	
+	AND #$10
+	BNE FAIL_DeltaModulationChannel3
+	INC <currentSubTest
+	; Thanks again to blargg for those tests!
+	; Now to extend this suite for some specific timing tests.
+	
+	;;; Test J [APU Delta Modulation Channel]: Check that the DMASync_50CyclesRemaining function works in this emulator ;;;	
+	JSR DMASync_50CyclesRemaining
+	JSR Clockslide_47
+	LDA $4000	; [Read Opcode] [Read Operand] [Read Operand] [DMC DMA! Databus = $00] [Read Open Bus]
+	BNE FAIL_DeltaModulationChannel3	; and if the read from $4000 wasn't $00, then fail the test.
+	INC <currentSubTest
+
+	;;; Test K [APU Delta Modulation Channel]: Check that that Sample Address overflows to $8000 instead of $0000 ;;;
+	; This requires the DMC DMA to update the databus, so you need to have open bus emulation correct.	
+	;
+	; Just so you know, the value at address $8000 is $EA. (A NOP instruction)
+	JSR DMASync_50CyclesRemaining
+	LDA #4		;+2
+	STA $4013	;+4 sample length = #4 * 16 + 1 = 65 (or $41 in hex)
+	LDA #$FF	;+2
+	STA $4012	;+4 Sample address is $FFC0
+	LDA #$4F	;+2
+	STA $4010	;+4 fastest rate. (also loop, so it refreshes the address and length)
+	LDX #$0	;+2
+	; 30 CPU cycles left.
+	JSR Clockslide_30
+	; DMA that reloads all the stuff.
+	; Next DMA in 428 cycles
+	JSR Clockslide_400
+	JSR Clockslide_25
+	; Next DMA in 3 cycles
+TEST_DMC_OverflowLoop: ; DMA every 432 CPU cycles.
+	LDA $4000 ;+3 [DMA start] +5	Read from the DMC DMA's modification to the data bus. (There will be bus conflicts reading the controllers... but oh well.
+	JSR Clockslide_400
+	JSR Clockslide_17	
+	INX	; +2   Increment X for the next loop.
+	CPX #$41 ; +2   If X = $41, we exit the loop.
+	BNE TEST_DMC_OverflowLoop ; +3 if looping. +2 if not. (total outside the clockslide = 29. 432-29 = 403)
+	; now that A = the $40th byte read:
+	CMP #$EA
+	BNE FAIL_DeltaModulationChannel4
+	INC <currentSubTest
+	
+	;;; Test J [APU Delta Modulation Channel]: Check that the DMA will be delayed by 1 CPU cycle if the write to $4015 occurs 2 cycles before the DMA timer reaches 0. ;;;
+	; This is blargg's original DMA sync routine.
+	; As I wrote in my notes there, blargg made an off-by-one error that allows for an interesting bug to be seen in emulators.
+	; While blargg's code was supposed to sync the DMC DMA to occur 3 cycles after the write to $4015, it actually occured 2 cycles after the write.
+	; Many emulators made the mistake of letting the DMA occur when the timer reaches zero, rather than after the 3 CPU cycle delay of the $4015 write.
+	;
+	; I'm going to hope that no page boundaries get crossed by any branches here, and I'm not actually aligning this code.
+	LDX #0
+	LDA #$80  ; slowest speed.
+	STA $4010 ; Enable DMC IRQ
+	LDA #$0
+	STA $4013 ; Length = 0 (+1)
+	STA $4015 ; Disable DMC
+	LDA #$10
+	STA $4015 ; Enable DMC (clear the DMC buffer)
+	NOP
+	STA $4015 ; Enable DMC a second time.
+TEST_DMCSync_loop:
+	BIT $4015	; This only exits once bit 4 is cleared.
+	BNE TEST_DMCSync_loop ; wait for DMC Interrupt
+	NOP
+	NOP
+	NOP
+	LDA #$E2
+	BNE TEST_DMCSync_First ; branch always to sync_dmc_first
+TEST_DMCSync_Wait:
+	LDA #$E3
+TEST_DMCSync_First:
+	NOP
+	NOP	
+	NOP
+	NOP
+	SEC
+	SBC #$01
+	BNE TEST_DMCSync_First
+	LDA #$10
+	STA $4015
+	NOP
+	BIT $4015
+	BNE TEST_DMCSync_Wait
+
+	; The DMA is now synced!
+	LDA <Copy_A ; waste 3 cycles
+	LDA <Copy_A ; waste 3 cycles
+	NOP
+	LDX #$A3
+	LDA #$03
+TEST_DMCSync_loop2:
+	DEX
+	BNE TEST_DMCSync_loop2
+	SEC
+	SBC #$01
+	BNE TEST_DMCSync_loop2
+	LDA #$40
+	STA $4010	; make it loop.
+	LDA #$10
+	STA $4015 ; start DMC
+	; Despite the DMC DMA being timed to occur in only 2 cycles, it actually occurs in 3 cycles, after the write to $4015 is seen by the audio chip.
+	NOP ; [Read Opcode] [Dummy Read]
+	NOP ; [Read Opcode] [DMC DMA] [Dummy Read]
+	; The next DMA will occur in 3419 CPU cycles.
+	JSR Clockslide_3000
+	JSR Clockslide_400
+	JSR Clockslide_15
+	LDA $4000	; [Read Opcode] [Read Operand] [Read Operand] [DMC DMA! Databus = $00] [Read Open Bus]
+	BNE FAIL_DeltaModulationChannel4
+	;; END OF TEST ;;
 	LDA #$00
     STA $4015	; disable all audio channels.
-	JMP TEST_Fail
+	LDA #1
+	RTS
+;;;;;;;
+
+FAIL_DeltaModulationChannel4:
+FAIL_DMC_Conflicts1:
+	JMP FAIL_AndDisableAudioChannels
 ;;;;;;;;;;;;;;;;;
+
+TEST_DMABusConflict:
+	; A very similar test to [APU Register Activation]. In fact, I highly suggest you pass that test before looking into this one, as it's slightly more complicated.
+	; As a recap, when the 6502 address bus is in the range $4000 to $401F, the APU registers are active (including mirrors of them.)
+	; Except the registers aren't just active from $4000 to $40FF. They are active everywhere. Every $20 bytes across the entire address space will be mirrors of the APU registers.
+	; Luckily, only 3 of the APU registers have readable values, and the rest are just open bus.
+	; So when the 6502 address bus is in the range $4000 to $401F, a DMC DMA reading a sample at address, for example, $FF16 will encounter a bus conflict with controller port 1!
+	; The bus conflict is works like this:
+	;	- Bits 5, 6, and 7 of the controller port are typically open bus, but in this instance, those 3 bits will be bits 5, 6, and 7 of the sample value read by the DMA, while the rest of the bits are a standard controller read.
+	; 	- You could easily emulate this as two lines:
+	; 		- Read(CurrentSampleAddress); 
+	; 		- Read(0x4000 | (CurrentSampleAddress & 0x1F)); 
+	;	- But of course, in reality there is only a single read per CPU cycle.
+	;	- (friendly reminder that reading from $4015 does not update the data bus)
+	;
+	; Anyway, if you passed [APU Register Activation], you should have a good idea at what's going on.
+	; We're going to be running a series of DMA's, and syncing them all with a read from $4000, such that the databus is changed by the DMA 1 cycle before the Open bus read.
+	; Then, if the bus conflict happens, we can see that will well timed DMAs and open bus reads.
+	;
+	; Please don't press anything on controller 2 during this test. :)
+	
+	;;; Test 1 [DMA Bus Conflicts]: Check that the DMASync_50CyclesRemaining function works in this emulator ;;;	
+	JSR DMASync_50CyclesRemaining
+	JSR Clockslide_47
+	LDA $4000	; [Read Opcode] [Read Operand] [Read Operand] [DMC DMA! Databus = $00] [Read Open Bus]
+	BNE FAIL_DMC_Conflicts1	; and if the read from $4000 wasn't $00, then fail the test.
+	INC <currentSubTest
+
+	;;; Test 2 [DMA Bus Conflicts]: The bus conflicts exist. ;;;
+	; I know, we're jumping right into this one.
+	; Anyway, here's how the test works.
+	; I'm going to read about $40 samples with DMAs, and compare the values read with a look-up-table answer sheet. It's one of those.
+	; And hey, for the fun of it, let's also set the frame counter IRQ flag, which gets cleared by reading $4015.
+	LDA #$00
+	STA $4017
+	JSR Clockslide_30000
+	; Okay cool, the frame coutner IRQ flag should now be set.
+	
+	JSR DMASync_50CyclesRemaining
+	LDA #4		;+2
+	STA $4013	;+4 sample length = #4 * 16 + 1 = 65 (or $41 in hex)
+	LDA #$BF	;+2
+	STA $4012	;+4 Sample address is $FFC0
+	LDA #$4F	;+2
+	STA $4010	;+4 fastest rate. (also loop, so it refreshes the address and length)
+	LDX #$0	;+2
+	; 30 CPU cycles left.
+	JSR Clockslide_30
+	; DMA that reloads all the stuff.
+	; Next DMA in 428 cycles
+	LDA #$00
+	STA $4017	; Keep the interrupt flag set, but refresh the timer.
+	JSR Clockslide_400
+	JSR Clockslide_19
+	; Next DMA in 3 cycles
+TEST_DMC_ConflictLoop: ; DMA every 432 CPU cycles.
+	LDA $4000 ;+3 [DMA start] +5	Read from the DMC DMA's modification to the data bus. (There will be bus conflicts reading the controllers... but oh well.
+	STA $500, X
+	JSR Clockslide_400
+	LDA #$00
+	STA $4017	; Keep the interrupt flag set, but refresh the timer.
+	NOP
+	NOP
+	NOP
+	INX	; +2   Increment X for the next loop.
+	CPX #$40 ; +2   If X = $40, we exit the loop.
+	BNE TEST_DMC_ConflictLoop ; +3 if looping. +2 if not. (total outside the clockslide = 29. 432-29 = 403)
+	; Cool, now all $40 of those reads are stored at address $500.
+	LDX #0
+TEST_DMC_Conflict_AnswerLoop:
+	LDA $500, X
+	CMP TEST_DMC_Conflicts_AnswerKey, X
+	BNE FAIL_DMC_Conflicts
+	INX
+	CPX #$40
+	BNE TEST_DMC_Conflict_AnswerLoop
+	
+	
+	LDA #$00
+    STA $4015	; disable all audio channels.
+	LDA #1
+	RTS
+;;;;;;;
+	
+FAIL_DMC_Conflicts:
+	JMP FAIL_AndDisableAudioChannels
+;;;;;;;;;;;;;;;;;
+	
+	.bank 3
+	.org $EF80
+TEST_DMC_Conflicts_AnswerKey:
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $01, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+	.byte $FF, $FF, $FF, $FF, $FF, $FF, $E1, $E0, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+
+	.org $EFC0
+TEST_DMC_ConflictsSample:
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+	.byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+	.byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                ENGINE                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Just a ton of helper functions letting me save some bytes in the tests, and also key functions for loading and navigating the main menu.
-	
-	.bank 3
 	.org $F000
 
 EnableRendering:; Enables rending both sprites and background. Does not affect the other mask flags.
@@ -8960,9 +9475,7 @@ SetUpNMIRoutineForMainMenu:	; This sets up the values at $700 in RAM to be a JMP
 DMASync_50CyclesRemaining:	; Sync the CPU and the DMA, such that the DMA runs exactly 50 CPU cycles after the RTS instruction ends.
 	JSR DMASync
 	; the DMA is in 406 cycles;
-	JSR Clockslide_100 ; 406 -> 306
-	JSR Clockslide_100 ; 306 -> 206
-	JSR Clockslide_100 ; 206 -> 106
+	JSR Clockslide_300 ; 406 -> 106
 	JSR Clockslide_50  ; 106 -> 56
 	RTS ; 56 -> 50 cycles after this RTS, a DMA will occur.
 	
@@ -9278,6 +9791,51 @@ Clockslide_52180:
 	RTS
 ;;;;;;;
 
+Clockslide_4320:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_20	;120
+	JSR Clockslide_200  ;320
+	JSR Clockslide_4000 ;4320
+	RTS
+;;;;;;;
+
+Clockslide_8640:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_40	;140
+	JSR Clockslide_500  ;640
+	JSR Clockslide_8000 ;8640
+	RTS
+;;;;;;;
+
+Clockslide_12960:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_40	;140
+	JSR Clockslide_20	;160
+	JSR Clockslide_800  ;960
+	JSR Clockslide_2000 ;2960
+	JSR Clockslide_10000 ;2960
+	RTS
+;;;;;;;
+
+Clockslide_26352:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_40	;140
+	JSR Clockslide_12	;152
+	JSR Clockslide_200  ;352
+	JSR Clockslide_6000 ;6352
+	JSR Clockslide_20000;26352
+	RTS
+;;;;;;;
+
+Clockslide_1728:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_28	;128
+	JSR Clockslide_600  ;728
+	JSR Clockslide_1000 ;1728
+	RTS
+;;;;;;;
+
+
 
 Clockslide36_Plus_A:;+6
 	STA <$00	; +3
@@ -9369,12 +9927,13 @@ DMASync40_Loop:
 	; so we have 50 cycles to go.
 		
 DMASyncButSlightlyLessReliable:
-	; This fuction *should* exit with exactly 406 CPU cycles until the DMA occurs. It does on my console, but not so much for various emulators.
-	; But hey, this one doesn't rely on open bus, and won't infinite loop.
+	; This fuction *should* exit with exactly 406 CPU cycles until the DMA occurs.
+	; It's a very slightly modified version of the DMA sync routine made by blargg in 2005.
+	; It doesn't rely on reading open bus, rather is just simply relies on perfectly timed DMAs, and the 3 or 4 cpu cycle delay after writing to $4015.
 	LDX #0
-	LDA #$80
+	LDA #$80  ; slowest speed.
 	STA $4010 ; Enable DMC IRQ
-	LDA #$00
+	LDA #$0
 	STA $4013 ; Length = 0 (+1)
 	STA $4015 ; Disable DMC
 	LDA #$10
@@ -9382,7 +9941,7 @@ DMASyncButSlightlyLessReliable:
 	NOP
 	STA $4015 ; Enable DMC a second time.
 sync_dmc_loop:
-	BIT $4015
+	BIT $4015	; This only exits once bit 4 is cleared.
 	BNE sync_dmc_loop ; wait for DMC Interrupt
 	NOP
 	NOP
@@ -9391,9 +9950,9 @@ sync_dmc_loop:
 	BNE sync_dmc_first ; branch always to sync_dmc_first
 sync_dmc_wait:
 	LDA #$E3
-sync_dmc_first:
-	INX
-	BEQ sync_dmc_Fail	; This will certainly not loop 256 times, unless your timing is way off.
+sync_dmc_first:	; Okay, this loops infinitely on virtual console. Ahhhhhhhhhhhhh!
+	NOP
+	NOP	
 	NOP
 	NOP
 	SEC
@@ -9401,6 +9960,7 @@ sync_dmc_first:
 	BNE sync_dmc_first
 	LDA #$10
 	STA $4015
+	NOP
 	BIT $4015
 	BNE sync_dmc_wait
 
@@ -9417,34 +9977,22 @@ sync_dmc_loop2:
 	SBC #$01
 	BNE sync_dmc_loop2
 	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
+	NOP			; waste 2 cycles.
 	LDA #$10
 	STA $4015 ; start DMC
+	; The DMC DMA is specifically timed to occur exactly 3 cpu cycles after this write.
+	; Blargg's original DMC DMA sync routine ran this STA 1 cycle too late, which exposed an interesting error in a lot of emulators.
+	; I'll be testing for this error in my DMC DMA test.
 	LDA #$10
 	STA $4015 ; start DMC again
-			  ; 3404 CPU cycles intil the DMA.
+			  ; 3404 CPU cycles until the DMA.
 			  ; the objective is to RTS with 412 cycles, so post RTS is 406 cycles remaining.
-	JSR Clockslide_500 ; 3404 -> 2904
-	JSR Clockslide_500 ; 2904 -> 2404
-	JSR Clockslide_500 ; 2404 -> 1904
-	JSR Clockslide_500 ; 1904 -> 1404
-	JSR Clockslide_500 ; 1404 -> 904
-	JSR Clockslide_100 ; 904 -> 804
-	JSR Clockslide_100 ; 804 -> 704
-	JSR Clockslide_100 ; 704 -> 604
-	JSR Clockslide_100 ; 604 -> 504
-	JSR Clockslide_50 ; 504 -> 454
-	JSR Clockslide_42 ; 454 -> 412
+	JSR Clockslide_3000
+	NOP
+	NOP
 	RTS				  ; 412 -> 406
 	; the next DMA is at (432) cycles, so we have 406 cycles to go.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-sync_dmc_Fail: ; This is to prevent an infinite loop for an emulator that hasn't implemented the DMC DMA stuff, or is just off on the timing.
-	; Well, if you amde it here, the test was going to fail anyway, let's be honest.
-	; Just RTS.
-	RTS
-;;;;;;;
-
 
 	.org $FF00
 Clockslide:
@@ -9579,7 +10127,7 @@ TEST_DoesTheDMAUpdateOpenBus:
 	LDA #$FF
 	STA $4012 ; Sample address $FFC0.
 	LDA #0
-	STA $4013 ; #1 * 16 + 1 = 17 byte length.
+	STA $4013 ; #1 byte length. (I still have 17 00s in a row since other tests do use a length of 17)
 	LDA #$10
 	STA $4015 ; Start the DMC DMA loop
 	LDX #0
