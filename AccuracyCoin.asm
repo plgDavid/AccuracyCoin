@@ -67,6 +67,12 @@ Test_UnOp_CycleDelayPostDMA = $32
 
 HighlightTextPrinted = $33
 AutomateTestSuite = $34
+RunningAllTests = $35
+PostAllTestScreen = $36
+PostAllTestTally = $37
+PostAllPassTally = $38
+PrintDecimalTensCheck = $39
+
 
 PostDMACyclesUntilTestInstruction = 14
 
@@ -83,11 +89,15 @@ suitePointerList = $80
 
 suiteExecPointerList = $A0
 
-Reserved_C8 = $C8; For my "unofficial opcodes are correct length" tests, I use [Two-Byte-Opcode][INY], and then check the value of Y. Since INY is $E8, I'd like to avoid corrupting something stored in byte C8.
+Reserved_C8 = $C8; For my "unofficial opcodes are correct length" tests, I use [Two-Byte-Opcode][INY], and then check the value of Y. Since INY is $C8, I'd like to avoid corrupting something stored in byte C8.
+
+
+Copy_X2 = $ED	; These are exclusively used to keep registers from before RunTest from being modified during a test, so they can be restored after the test.
+Copy_Y2 = $EE	; ^
+Copy_A2 = $EF	; ^
 
 PPUCTRL_COPY = $F0
 PPUMASK_COPY = $F1
-
 
 Copy_SP = $FA
 Copy_SP2 = $FB
@@ -228,9 +238,9 @@ result_APULengthTable = $466
 result_FrameCounterIRQ = $467
 result_FrameCounter4Step = $468
 result_FrameCounter5Step = $469
-result_DeltaModulationChannel = $470
-result_DMABusConflict = $471
-result_DMA_Plus_OpenBus = $472
+result_DeltaModulationChannel = $49A
+result_DMABusConflict = $49B
+result_DMA_Plus_OpenBus = $49C
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -321,6 +331,8 @@ PostResetFlagTest:
 	JSR SetUpDefaultPalette
 	JSR ClearNametable
 	JSR ClearRAMExceptPage3
+ReloadMainMenu:
+	JSR ClearPage2
 	LDA #02
 	STA $4014 ; Set up OAM
 	
@@ -615,6 +627,280 @@ Suite_PPUMisc:
 	;table "Palette Corruption", $FF, result_Unimplemented, DebugTest
 	.byte $FF
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;           MORE ENGINE STUFF             ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; I ran out of space in the engine section from $F000 - $FFFF, so I put some extra stuff here.
+
+AutomaticallyRunEveryTestInROM:   ; This function is used to run every test in the ROM automatically.
+	LDA #1
+	STA <RunningAllTests          ; The "RunningAllTests" variable is used to prevent any graphical changes to the "running all tests screen".
+	JSR DisableNMI                ; Disable the NMI.
+	JSR DisableRendering
+	JSR ClearNametable
+	JSR PrintText
+	.word $21E8
+	.byte "Running test 0", $FF
+	LDY #0
+	STY <PostAllTestTally
+AutomaticallyRunEntireROM_Loop:
+	STY <menuTabXPos
+	JSR SetUpSuitePointer         ; Set up the suite pointer.
+	JSR LoadSuiteMenuNoRendering  ; Set up the menuHeight, and all the pointers for these tests and results.
+	LDX #0
+AutomaticallyRunEntireROM_Loop2:  ; Run every test on the page Y.
+	STX <menuCursorYPos           ; The "menuCursorYPos" variable is used inside RunTest to determing what code to run.
+	JSR RunTest                   ; Run the test at index X of page Y.
+	JSR WaitForVBlank
+	TXA
+	PHA
+	LDA #$21
+	STA $2006
+	LDA #$F5
+	STA $2006
+	INC <PostAllTestTally
+	LDA <PostAllTestTally
+	JSR PrintByteDecimal_MinDigits
+	JSR ResetScroll
+	PLA
+	TAX
+	INX                           ; increment X until X=MenuHeight.
+	CPX <menuHeight
+	BNE AutomaticallyRunEntireROM_Loop2
+	                              ; That was all the tests on page Y.
+	INY                           ; Y++
+	CPY #((EndTableTable - TableTable)/2) ; Compare Y with the total page count.
+	BNE AutomaticallyRunEntireROM_Loop    ; And loop if there are more pages to run.
+	; All tests are complete!
+	JSR WaitForVBlank             ; Wait for vblank for the PPU register writes.
+	LDA #0
+	STA <RunningAllTests          ; Clear the "RunningAllTests" variable
+	JSR ResetScroll               ; Reset the PPU scroll.
+	; Let's draw a menu to render the results!
+	JSR DisableRendering
+	JSR ClearPage2
+	LDA #1
+	STA <$10 ; this is "currentSubTest" but since all teh tests are over, let's use this to count the number of sprites I'm adding to OAM. Set to 1 by default just to avoid sprite zero hits on the menu.
+	LDA #0
+	STA <PostAllPassTally
+	STA <PostAllTestTally
+	JSR ClearNametable	
+	JSR SetPPUADDRFromWord
+	.byte $20, $E7
+	LDA #$D0	; Upper left corner.
+	STA $2007
+	LDA #$D5	; horizontal bar.
+	LDX #0
+AREROM_MenuLoop1:
+	STA $2007
+	INX
+	CPX #((EndTableTable - TableTable)/2)+1 ; Compare X with the total page count.
+	BNE AREROM_MenuLoop1
+	LDA #$D1	; Upper right corner.
+	STA $2007
+	; And the tallest page has 10 tests, so let's make this ten tiles tall.
+	JSR SetPPUADDRFromWord
+	.byte $22, $47
+	LDA #$D2	; Bottom left corner.
+	STA $2007
+	LDA #$D5	; horizontal bar.
+	LDX #0
+AREROM_MenuLoop2:
+	STA $2007
+	INX
+	CPX #((EndTableTable - TableTable)/2)+1 ; Compare X with the total page count.
+	BNE AREROM_MenuLoop2
+	LDA #$D3	; Bottom right corner.
+	STA $2007
+	; And set up the horizontal bars.
+	LDA #4
+	STA $2000	; keep NMI disabled, but set the increment mode to 32 instead of 1.
+	JSR SetPPUADDRFromWord
+	.byte $21, $07
+	LDA #$D4	; horizontal bar.
+	LDX #0
+AREROM_MenuLoop3:
+	STA $2007
+	INX
+	CPX #10 ; once X = 11, stop.
+	BNE AREROM_MenuLoop3
+	JSR SetPPUADDRFromWord
+	.byte $21, $07+((EndTableTable - TableTable)/2)+2
+	LDA #$D4	; horizontal bar.
+	LDX #0
+AREROM_MenuLoop4:
+	STA $2007
+	INX
+	CPX #10 ; once X = 11, stop.
+	BNE AREROM_MenuLoop4
+	; Now to print the results of each test in columns corresponding to the pages and indexes into the pages.
+	
+AREROM_PageColumnLoop1:
+	STY <menuTabXPos
+	JSR SetUpSuitePointer         ; Set up the suite pointer.
+	JSR LoadSuiteMenuNoRendering  ; Set up the menuHeight, and all the pointers for these tests and results.
+	; set the v register to 2108 + Y
+	LDA #$21
+	STA $2006
+	TYA
+	CLC
+	ADC #08
+	STA $2006
+	LDX #0
+AREROM_PageColumnLoop2:           ; Run every test on the page Y.
+	INC <PostAllTestTally
+	STX <Copy_X
+	TXA
+	ASL A
+	TAX
+	LDA [suitePointerList,X]	; read the result of test X of page Y
+	AND #01
+	BEQ AREROM_PrintFail ; If the result isn't 1, print the error code
+	; and if it passes, print a blue square.
+	INC <PostAllPassTally ; also increment the "pass tally"
+	LDA #$FE
+	STA $2007
+	; If this test has multiple pass conditions (SHA/SHS tests, for instance) let's put a sprite here.
+	LDA [suitePointerList,X]	; read the result of test X of page Y
+	AND #$FE
+	BEQ AERROP_Next	; Check if theres an "error code". If not, move on.
+	; If so, let's figure out what the coordinates of this test is.
+	; X is, humorously going to give us the Y coordinate, and Y is likewise the X coordinate.
+	; starting at X coordinate $40, and Y coodinate $40 (-1)
+	; Each value of X or Y translates to 8 pixels.
+	PHA
+	STX <Copy_X2
+	LDA <$10	; load the OAM index
+	ASL A
+	ASL A
+	TAX			; transfer to X
+	LDA <Copy_X2
+	ASL A
+	ASL A		; multiply by 4 (X is already multiplied by 2 here)
+	CLC
+	ADC #$40
+	SEC
+	SBC #01		; subtract by 1.
+	STA $200,X
+	; The "error code" will be the pattern.	
+	PLA
+	LSR A
+	LSR A
+	STA $201,X
+	; The attirbutes will simply be: palette 1.
+	LDA #1
+	STA $202,X
+	; and the X position
+	TYA
+	ASL A
+	ASL A
+	ASL A		; multiply by 8
+	CLC
+	ADC #$40
+	STA $203,X
+	INC <$10
+	LDX <Copy_X2
+	JMP AERROP_Next
+AREROM_PrintFail:
+	LDA [suitePointerList,X]	; read the result again to get the error code.
+	LSR A	; shift error code into A
+	LSR A
+	ORA #$40	; to make it red in the table, ORA $40
+	STA $2007
+AERROP_Next:
+	LDX <Copy_X
+	INX                           ; increment X until X=MenuHeight.
+	CPX <menuHeight
+	BNE AREROM_PageColumnLoop2
+	                              ; That was all the tests on page Y.
+	INY                           ; Y++
+	CPY #((EndTableTable - TableTable)/2) ; Compare Y with the total page count.
+	BNE AREROM_PageColumnLoop1    ; And loop if there are more pages to run.
+		
+	LDA #0
+	STA $2000	; keep NMI disabled, but set the increment mode back to 1.
+	; and set up attributes for this table.
+	JSR SetPPUADDRFromWord
+	.byte $23, $D2
+	LDX #0
+AERROP_AttributeLoop:
+	LDA AERROP_Attributes, X
+	STA $2007
+	INX
+	CPX #21
+	BNE AERROP_AttributeLoop
+
+	; Let's print how many tests passed.
+	JSR PrintTextCentered
+	.word $2290
+	.byte "Tests passed:        ", $FF
+	;     "Tests passed: xyz / xyz"
+	JSR SetPPUADDRFromWord
+	.byte $22, $94
+	LDA <PostAllPassTally
+	JSR PrintByteDecimal_MinDigits
+	LDA #$24
+	LDX #$33
+	STA $2007
+	STX $2007
+	STA $2007
+	LDA <PostAllTestTally
+	JSR PrintByteDecimal_MinDigits
+
+	; I'd like to also like to label each of these columns with a page number.
+	JSR PrintText
+	.word $206F
+	.byte "Page", $FF
+	JSR PrintText
+	.word $20A8
+	.byte "12345678911111111", $FF
+	JSR PrintText
+	.word $20D1
+	.byte "01234567", $FF
+
+	JSR WaitForVBlank
+	JSR SetUpAllTestMenuPalette
+	
+	LDA #$4C
+	STA $700
+	LDA #LOW(PressStartToContinue)
+	STA $701
+	LDA #HIGH(PressStartToContinue)
+	STA $702
+	
+	JSR ResetScrollAndWaitForVBlank
+	LDA #2
+	STA $4014
+	JSR EnableRendering
+	JSR EnableNMI                 ; And enable the MNI.
+	RTS
+;;;;;;;
+
+AERROP_Attributes:
+	.byte $FF, $FF, $FF, $FF, $33, $00, $00, $00
+	.byte $FF, $FF, $FF, $FF, $33, $00, $00, $00
+	.byte $0F, $0F, $0F, $0F, $03
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+PressStartToContinue:
+	JSR ReadController1
+	LDA <controller_New
+	AND #$10
+	BEQ PressStartToContinue_End
+	JSR SetUpDefaultPalette
+	JSR DisableNMI
+	JSR DisableRendering
+	JSR ClearNametable
+	LDX #$EF ; Due to some tests modifying the stack pointer, it's convenient to put it at EF instead of FF.
+	TXS		 ; This prevents some tests where the resulting stack pointer is 00 from pushing data, and overwriting the bottom of the stack.
+	JMP ReloadMainMenu
+PressStartToContinue_End:
+	RTI
+	
+	
+	
+	
 	
 	.bank 1
 	.org $A000
@@ -1368,9 +1654,20 @@ TEST_DummyWritesPt2:
 	LDA #01
 	RTS
 
+RTS_If_Running_All_Tests:
+	LDA <RunningAllTests
+	BEQ RTS_If_Running_All_Tests_Continue ; skip printing stuff on screen if we're running all tests right now.
+	PLA
+	PLA
+	LDA #01
+	RTS
+RTS_If_Running_All_Tests_Continue:
+	RTS
+;;;;;;;
 
 TEST_PowerOnState_CPU_RAM:
 	;;; Test 1 [CPU RAM Power On State]: Print the values recorded at power on ;;;
+	JSR RTS_If_Running_All_Tests ; If running all tests automatically, skip drawing stuff on screen. This isn't actually testing anything anyway.
 	JSR ClearNametableFrom2240
 	JSR ResetScrollAndWaitForVBlank
 	JSR Print32Bytes
@@ -1384,6 +1681,7 @@ TEST_PowerOnState_CPU_RAM:
 
 TEST_PowerOnState_PPU_RAM:
 	;;; Test 1 [PPU RAM Power On State]: Print the values recorded at power on ;;;
+	JSR RTS_If_Running_All_Tests ; If running all tests automatically, skip drawing stuff on screen. This isn't actually testing anything anyway.
 	JSR ClearNametableFrom2240
 	JSR ResetScrollAndWaitForVBlank
 	JSR Print32Bytes
@@ -1397,6 +1695,7 @@ TEST_PowerOnState_PPU_RAM:
 
 TEST_PowerOnState_PPU_Palette:
 	;;; Test 1 [Palette RAM Power On State]: Print the values recorded at power on ;;;
+	JSR RTS_If_Running_All_Tests ; If running all tests automatically, skip drawing stuff on screen. This isn't actually testing anything anyway.
 	JSR ClearNametableFrom2240
 	JSR ResetScrollAndWaitForVBlank
 	JSR Print32Bytes
@@ -1419,6 +1718,7 @@ TEST_PowerOnState_PPU_ResetFlag:
 
 TEST_PowerOnState_CPU_Registers:
 	;;; Test 1 [CPU Registers Power On State]: Print the values recorded at power on ;;;
+	JSR RTS_If_Running_All_Tests ; If running all tests automatically, skip drawing stuff on screen. This isn't actually testing anything anyway.
 	JSR ClearNametableFrom2240
 	JSR ResetScrollAndWaitForVBlank
 	LDA #0
@@ -2977,6 +3277,9 @@ TEST_SHA_Behavior1_9F:
 	LDA #$9F
 TEST_SHA_Behavior1:
 	PHA
+	LDA <RunningAllTests
+	BNE TEST_SHA_Behavior1_SkipPrints
+	
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
@@ -2993,7 +3296,7 @@ TEST_SHA_Behavior1:
 	JSR PrintByte
 	
 	JSR ResetScrollAndWaitForVBlank
-
+TEST_SHA_Behavior1_SkipPrints:
 	PLA
 
 	JSR TEST_UnOp_Setup; Set the opcode
@@ -3069,7 +3372,7 @@ TEST_SHA_Behavior1:
 	.byte $8F, $FF, $00, (flag_i)
 	
 ;; END OF TEST ;;
-	LDA #1
+	LDA #5	; Pass, "code 1"
 	RTS
 	
 TEST_SHA_Behavior2_93
@@ -3078,7 +3381,10 @@ TEST_SHA_Behavior2_93
 TEST_SHA_Behavior2_9F:
 	LDA #$9F
 TEST_SHA_Behavior2:
-	PHA
+	PHA	
+	LDA <RunningAllTests
+	BNE TEST_SHA_Behavior2_SkipPrints
+	
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
@@ -3095,7 +3401,7 @@ TEST_SHA_Behavior2:
 	JSR PrintByte
 	
 	JSR ResetScrollAndWaitForVBlank
-
+TEST_SHA_Behavior2_SkipPrints:
 	PLA
 	JSR TEST_UnOp_Setup; Set the opcode
 	; This test follows the behavior of many consoles I tested, though differs from the documentation.
@@ -3151,7 +3457,7 @@ TEST_SHA_Behavior2:
 	.byte $8F, $FF, $00, (flag_i)
 	
 	;; END OF TEST ;;
-	LDA #1
+	LDA #9	; Pass, "code 2"
 	RTS
 
 
@@ -3202,6 +3508,8 @@ TEST_SHS_Behavior2_9B_JMP:
 	
 TEST_SHS_Behavior1_9B:
 
+	LDA <RunningAllTests
+	BNE TEST_SHS_Behavior1_SkipPrints
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
@@ -3221,7 +3529,7 @@ TEST_SHS_Behavior1_9B:
 	LDA <$50
 	JSR PrintByte
 	JSR ResetScrollAndWaitForVBlank
-
+TEST_SHS_Behavior1_SkipPrints:
 	LDA #$9B
 	JSR TEST_UnOp_Setup; Set the opcode
 	; This test follows the documented behavior of these instructions. Most emulators probably go here.
@@ -3296,10 +3604,11 @@ TEST_SHS_Behavior1_9B:
 	.byte $8F, $FF, $00, (flag_i), $8F
 	
 ;; END OF TEST ;;
-	LDA #1
+	LDA #5	; Pass "code 1"
 	RTS
 TEST_SHS_Behavior2_9B:
-
+	LDA <RunningAllTests
+	BNE TEST_SHS_Behavior2_SkipPrints
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
@@ -3319,7 +3628,7 @@ TEST_SHS_Behavior2_9B:
 	LDA <$50
 	JSR PrintByte
 	JSR ResetScrollAndWaitForVBlank
-
+TEST_SHS_Behavior2_SkipPrints:
 	LDA #$9B
 	JSR TEST_UnOp_Setup; Set the opcode
 	JSR TEST_RunTest_AddrInitAXYFS
@@ -3367,7 +3676,7 @@ TEST_SHS_Behavior2_9B:
 
 
 ;; END OF TEST ;;
-	LDA #1
+	LDA #9	; Pass "code 2"
 	RTS
 
 TEST_SHY_9C:
@@ -3735,6 +4044,11 @@ TEST_MAGIC_Continue:
 	RTS
 	
 TEST_MAGIC_Continue2:
+	LDA <RunningAllTests
+	BEQ TEST_MAGIC_Continue3 ; skip printing stuff on screen if we're running all tests right now.
+	LDA #01
+	RTS
+TEST_MAGIC_Continue3:
 	LDA #0
 	STA <dontSetPointer
 	JSR PrintTextCentered
@@ -5727,6 +6041,8 @@ TEST_APURegActivation_SkipResetY:
 	; Bravo!
 	
 	;; END OF TEST ;;
+	LDA #0
+	STA $4015
 	LDA #1
 	RTS
 ;;;;;;;
@@ -5869,6 +6185,12 @@ TEST_ControllerStrobing:
 	LDA #1
 	RTS
 ;;;;;;;
+
+	.bank 2	; If I don't do this, the ROM won't compile.
+	.org $C000
+	
+	; and 33 00s in a row for a nice and neat silent DPCM sample.
+	.byte $00,  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 
 FAIL_InstructionTiming:
 	JMP TEST_Fail
@@ -6161,13 +6483,6 @@ TEST_InstructionTimingRTS:
 FAIL_InstructionTiming2:
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
-
-	.bank 2	; If I don't do this, the ROM won't compile.
-	.org $C000
-	
-	; and 33 00s in a row for a nice and neat silent DPCM sample.
-	.byte $00,  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-
 
 TEST_IFlagLatency_IRQ:
 	STX <$50
@@ -6807,6 +7122,7 @@ TEST_RMW2007_ClearNametableLoop:
 	JSR ResetScroll
 	JSR WaitForVBlank
 	JSR SetUpDefaultPalette
+	JSR ResetScroll
 	LDA #1
 	RTS
 ;;;;;;;
@@ -6816,6 +7132,7 @@ FAIL_RMW2007:
 	JSR ResetScroll
 	JSR WaitForVBlank
 	JSR SetUpDefaultPalette
+	JSR ResetScroll
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;	
 
@@ -7678,6 +7995,7 @@ FAIL_DeltaModulationChannelContinue:
 	BEQ FAIL_DeltaModulationChannel2 ; it should still be playing, since it loops.
 	LDA #$00
 	STA $4015	; stopping the DMC should still stop the looping sample.
+	; You might fail this test if you are waiting 3 or 4 CPU cyles to disable the DMC Channel.
 	LDA $4015
 	AND #$10
 	BNE FAIL_DeltaModulationChannel2
@@ -7941,7 +8259,8 @@ TEST_DMABusConflict:
 	; Then, if the bus conflict happens, we can see that will well timed DMAs and open bus reads.
 	;
 	; Please don't press anything on controller 2 during this test. :)
-	; On that note, another firendly reminder that controller 1 has already been read 8 times before this test. I'm not bothering to re-strobe controllers here, plus having different results on controller 1 and 2 is useful.
+
+	JSR ReadController1 ; This strobes controllers and read controller 1 8 times. Controller 2 is left unread, so again, holding buttons on controlelr 2 will fail this test.
 	
 	;;; Test 1 [DMA Bus Conflicts]: Check that the DMASync_50CyclesRemaining function works in this emulator ;;;	
 	JSR DMASync_50CyclesRemaining
@@ -8571,6 +8890,24 @@ SetUpPaletteLoop:
 	BNE SetUpPaletteLoop
 	RTS
 ;;;;;;;
+
+AllTestMenuPalette:	; The color palette used in the results screen of the all-test-menu.
+	.byte $2D,$30,$30,$30,$0F,$21,$21,$21,$0F,$26,$26,$26,$0F,$26,$06,$21
+	.byte $2D,$30,$30,$30,$0F,$31,$31,$31,$0F,$30,$30,$30,$0F,$30,$30,$30	
+SetUpAllTestMenuPalette: ; This function overwrites palette RAM with the values in the above table.
+	LDA #$3F
+	STA $2006
+	LDA #$00
+	STA $2006
+	LDY #0
+SetUpAllTestMenuPaletteLoop:
+	LDA AllTestMenuPalette,Y
+	STA $2007
+	INY
+	CPY #32
+	BNE SetUpAllTestMenuPaletteLoop
+	RTS
+;;;;;;;
 	
 CopyReturnAddressToByte0: ; Several helper functions have a series of bytes following them that need to be read to adjust how the function runs.
 	; For instance, JSR PrintText has a .word, and a string+terminator following a .byte
@@ -8624,10 +8961,101 @@ FixRTS:	; Correct the return address so any stack modifications for other functi
 	RTS
 ;;;;;;;
 
+LoadSuiteMenuNoRendering:	; This only sets up the pointers for tests and results, as well as menuHeight, without any updates to the nametable. Used in the "run every test in the ROM" subroutine.
+	STY <Copy_Y
+	LDA <suitePointer
+	STA <$00
+	LDA <suitePointer+1
+	STA <$01
+	; Address $0000 is now the suite pointer.
+	LDY #0
+	; The first part of a suite is the name, which we aren't rendering here, so let's keep looking until we find $FF.
+LSMNR_Loop1:
+	LDA [$0000], Y
+	INY
+	CMP #$FF
+	BNE LSMNR_Loop1
+	TYA
+	CLC
+	ADC <suitePointer
+	STA <suitePointer
+	BCC LSMNR_SkipInc
+	INC <suitePointer+1
+LSMNR_SkipInc:
+	; Now that we're past the name of the suite, we need to loop over every entry for a page.
+	; the format is: Name, $FF, ResultPointer, TestPointer
+	; If the first byte of Name is $FF, then we loaded everything in a page.
+	LDX #0
+	STX <Copy_X
+LSMNR_Loop2:
+	LDY #0
+	LDA <suitePointer
+	STA <$00
+	LDA <suitePointer+1
+	STA <$01
+	; Check if we're done with the page.
+	LDA [$0000], Y
+	CMP #$FF
+	BNE LSMNR_SkipExit
+	LDA <Copy_X
+	LSR A
+	STA <menuHeight
+	LDY <Copy_Y
+	RTS	
+LSMNR_SkipExit:
+	; Alright, let's skip this string.
+	LDY #0
+LSMNR_Loop3:
+	LDA [$0000], Y
+	INY
+	CMP #$FF
+	BNE LSMNR_Loop3
+	TYA
+	CLC
+	ADC <suitePointer
+	STA <suitePointer
+	BCC LSMNR_SkipInc2
+	INC <suitePointer+1
+LSMNR_SkipInc2:
+	LDA <suitePointer
+	STA <$00
+	LDA <suitePointer+1
+	STA <$01
+	; Now we grab the result pointer.
+	LDY #0
+	LDX <Copy_X
+	LDA [$0000], Y
+	STA <suitePointerList, X
+	INY
+	INX
+	LDA [$0000],Y
+	STA <suitePointerList, X
+	INY
+	DEX
+	LDA [$0000],Y
+	STA <suiteExecPointerList, X
+	INY
+	INX
+	LDA [$0000],Y
+	STA <suiteExecPointerList, X
+	INY
+	INX	
+	STX <Copy_X
+	; Y = 4.
+	TYA
+	CLC
+	ADC <suitePointer
+	STA <suitePointer
+	BCC LSMNR_SkipInc3
+	INC <suitePointer+1
+LSMNR_SkipInc3:
+	JMP LSMNR_Loop2
+;;;;;;;;;;;;;;;;;;;
+
 LoadSuiteMenu: ; Print a list of tests to run. If these tests have been ran before, print the results too!
 	; assume the beginning of the suite is currently stored at suitePointer
 	; print the name of the suite.
-	; set up the PPU address to $2050
+	; set up the PPU address to $2050	
 	LDA #$20
 	STA <$03
 	LDA #$70
@@ -8640,7 +9068,6 @@ LoadSuiteMenu: ; Print a list of tests to run. If these tests have been ran befo
 	LDA <suitePointer+1
 	STA <$01
 	JSR PrintTextCentered
-	
 	; set up the PPU address to $20A8
 	LDA #$20
 	STA <$03
@@ -8693,8 +9120,7 @@ LSM_DontExitLoop:
 	LDA [$0000],Y
 	STA <suiteExecPointerList, X
 	INY
-	DEX
-	
+	DEX	
 	; let's also update the attribute tables before prepping X for the next loop.
 	TXA
 	PHA
@@ -9121,39 +9547,42 @@ NMI_Menu_Top_NotPressingLeft:
 NMI_Menu_Top_NotPressingDown:
 	; If we press A, let's run every test in the suite automatically!
 	LDA <controller_New
-	AND #$80 ; down
+	AND #$80 ; A
 	BEQ NMI_Menu_Top_NotPressingA
 	JSR AutomaticallyRunEveryTestInSuite
 NMI_Menu_Top_NotPressingA:
+	; If we press Start, let's run every test in the ROM!
+	LDA <controller_New
+	AND #$10 ; Start
+	BEQ NMI_Menu_Top_NotPressingStart
+	JSR AutomaticallyRunEveryTestInROM
+NMI_Menu_Top_NotPressingStart:
 ExitNMI:
 	JSR ResetScroll
 	RTI
 ;;;;;;;
 
-AutomaticallyRunEveryTestInSuite:
+AutomaticallyRunEveryTestInSuite: ; This subroutine is used to run every test on a page automatically.
 	LDA #1
-	STA <AutomateTestSuite
-	JSR DisableNMI
+	STA <AutomateTestSuite        ; The "AutomateTestSuite" varaible is used to prevent awkward highlighting of the test results.
+	JSR DisableNMI                ; Disable the NMI, since we're not going to want any extra NMI's running in the middle of this.
 	LDX #0
-AutomaticallyRunEveryTestLoop:
-	STX <menuCursorYPos
-	JSR RunTest
-	INX
-	CPX <menuHeight
+AutomaticallyRunEveryTestLoop:    ; This loop runs once per test on a page.
+	STX <menuCursorYPos           ; The "menuCursorYPos" variable is used inside RunTest to determing what code to run.
+	JSR RunTest                   ; Run the test at this index into the page.
+	INX                           ; increment X until X=MenuHeight.
+	CPX <menuHeight               ; The "menuHeight" is just how many tests are on a page.
 	BNE AutomaticallyRunEveryTestLoop
 	LDA #$FF
-	STA <menuCursorYPos
+	STA <menuCursorYPos           ; A "menuCursorYPos" of $FF is the top of the menu. (Highlighting the page number)
 	LDA #0
-	STA <AutomateTestSuite
-	JSR ResetScroll
-	JSR EnableNMI
+	STA <AutomateTestSuite        ; Disable the "AutomateTestSuite" varaible.
+	JSR ResetScroll               ; Reset the PPU scroll.
+	JSR EnableNMI                 ; And enable the MNI.
 	RTS
 ;;;;;;;
 
-DrawNewSuiteTable:	; Draws and prepares the suite, menuTabXPos
-	JSR DisableNMI
-	JSR DisableRendering
-	JSR ClearNametable
+SetUpSuitePointer:
 	LDA <menuTabXPos
 	ASL A
 	TAX	
@@ -9161,6 +9590,14 @@ DrawNewSuiteTable:	; Draws and prepares the suite, menuTabXPos
 	STA <suitePointer
 	LDA TableTable+1,X
 	STA <suitePointer+1
+	RTS
+;;;;;;;
+
+DrawNewSuiteTable:	; Draws and prepares the suite, menuTabXPos
+	JSR DisableNMI
+	JSR DisableRendering
+	JSR ClearNametable
+	JSR SetUpSuitePointer
 	JSR LoadSuiteMenu
 	
 	JSR DrawPageNumber
@@ -9252,7 +9689,7 @@ ReadControllerInto50_Loop:
 
 MaskDpadConflicts:	; If you are holding both left + right, cancel them out. The same applies for up + down,
 	LDA <controller
-	AND <$F0
+	AND #$F0
 	STA <byteF
 	LDA <controller
 	AND #$0F
@@ -9261,7 +9698,7 @@ MaskDpadConflicts:	; If you are holding both left + right, cancel them out. The 
 	ORA <byteF
 	STA <controller
 	LDA <controller_New
-	AND <$F0
+	AND #$F0
 	STA <byteF
 	LDA <controller_New
 	AND #$0F
@@ -9278,9 +9715,13 @@ DpadConflictMask: ; A LUT for masking the dpad values.
 RunTest:
 	; This function sets things up, then jumps to "JSRFromRAM" where a JSR to the test occurs.
 	; Basically, this makes a bunch of preparations for tests, like clearing page 5 of RAM, halting the NMI, etc.
-	STY <$FE	                  ; Store the Y register
-	STX <$FD	                  ; Store the X register
+	STA <Copy_A2                  ; Store the A register
+	STY <Copy_Y2                  ; Store the Y register
+	STX <Copy_X2                  ; Store the X register
+	LDA <RunningAllTests
+	BNE RunTest_AllTestSkipNMI	  ; Since the NMI is already disabled, we don't need to write to $2000 
 	JSR DisableNMI	              ; We don't want the NMI occuring during the tests. (and if we do, overwrite the NMI function in RAM before enabling it)
+RunTest_AllTestSkipNMI:
 	LDX <menuCursorYPos           ; X = which test from the current suite we're running
 	TXA
 	ASL A				          ; Double X, since we're reading a 2-byte word from a list of 2-byte words.
@@ -9294,24 +9735,31 @@ RunTest:
 	STA <TestResultPointer        ; and store it in RAM
 	LDA <suitePointerList+1,X     ; read the high byte of where to store the test results.
 	STA <TestResultPointer+1      ; and store it in RAM next to the low byte.
+	LDA <RunningAllTests
+	BNE RunTest_AllTestSkipDrawing1
 	LDY #0
 	LDA #3	                      ; a value of 3 here is used to draw "...." as the test status.
 	STA [TestResultPointer],Y     ; mark this test as "in progress"
 	LDX <menuCursorYPos           ; load X for the upcoming subroutines.
 	JSR DrawTEST	              ; replace the word "TEST" with "...."
 	JSR HighlightTest             ; and highlight it, since the cursor is still here.
+	JSR ResetScroll		          ; Reset the scroll before the test, since we just modified 'v' inside the previous subroutines.
+RunTest_AllTestSkipDrawing1:
 	LDA #1
 	STA <currentSubTest           ; set this to 1 before running any tests.
 	STA <initialSubTest			  ; Some tests have multiple sets of tests to run, all using the same code. So writing here changes the test value.
 	LDA #$80
 	STA <Test_UnOp_SP			  ; Some tests might modify the stack pointer. The test will use a value of $80 just to be sure it's not overwriting other stack data.
-	JSR ResetScroll		          ; Reset the scroll before the test, since we just modified 'v' inside the previous subroutines.
 	JSR ClearPage5		          ; clear RAM from $500 to $5FF. That RAM is dedicated for running tests, so we want it clean.
 	JSR WaitForVBlank             ; this makes debugging your own emulator with this ROM much easier, since the test should always begin at the start of a frame.
 	JSR JSRFromRAM                ; !! This is where the test occurs. "JSRFromRAM" is at address $001A. !!
 	                              ; The A Register holds the results of the test.
 	LDY #0
 	STA [TestResultPointer],Y     ; store the test results in RAM.
+	STA <Copy_A
+	LDA <RunningAllTests
+	BNE RunTest_AllTestSkipDrawing2
+	LDA <Copy_A
 	JSR WaitForVBlank			  ; and wait for VBlank before updating the "...." text with the results.
 	LDX <menuCursorYPos		      ; load X for the upcoming subroutines.
 	JSR DrawTEST			      ; draw "PASS" or "FAIL x"
@@ -9322,9 +9770,11 @@ RunTest:
 RunTest_SkipHighlightResult:
 	JSR SetUpNMIRoutineForMainMenu; Recreate the NMI routine JMP, since some tests need their own NMI routine.
 	JSR EnableNMI			      ; With the test over, re-enable the NMI
+RunTest_AllTestSkipDrawing2:	  ; If we're running all tests, we don't need the NMI to run.
 	JSR EnableRendering_BG	      ; and enable rendering too. This should still occur during Vblank.
-	LDY <$FE				      ; Restore the Y register
-	LDX <$FD				      ; Restore the X register
+	LDY <Copy_Y2			      ; Restore the Y register
+	LDX <Copy_X2			      ; Restore the X register
+	LDA <Copy_A2			      ; Restore the A register
 	RTS
 ;;;;;;;
 
@@ -9457,6 +9907,8 @@ PBD_SkipHighlightOnes:
 PrintByteDecimal_MinDigits:	; Takes the A register and prints a decimal representation of that value on the nametable at the current "v" address. Removes trailing zeroes.
 	; This doesn't make any stack shenanigans.
 	PHA
+	LDX #1
+	STX <PrintDecimalTensCheck
 	LDX #$FF
 PBDMD_HundredsLoop:
 	; Calculate the hundreds digit in decimal.
@@ -9469,12 +9921,14 @@ PBDMD_HundredsLoop:
 	PHA
 	TXA
 	BEQ PBDMD_SkipHundredsDigit
+	INC <PrintDecimalTensCheck
 	LDX <HighlightTextPrinted
 	BEQ PBDMD_SkipHighlightHundreds
 	ORA #$80
 PBDMD_SkipHighlightHundreds:
 	STA $2007
 PBDMD_SkipHundredsDigit:
+	DEC <PrintDecimalTensCheck
 	PLA
 	LDX #$FF
 PBDMD_TensLoop:
@@ -9487,7 +9941,10 @@ PBDMD_TensLoop:
 	ADC #10
 	PHA
 	TXA
+	; if both this value and PrintDecimalTensCheck are zero, don't print a zero here. Otherwise, the hundreds digit was printed, and we need to print a zero here.
+	ORA <PrintDecimalTensCheck
 	BEQ PBDMD_SkipTensDigit
+	TXA
 	LDX <HighlightTextPrinted
 	BEQ PBDMD_SkipHighlightTens
 	ORA #$80
