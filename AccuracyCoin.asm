@@ -239,9 +239,9 @@ result_APULengthTable = $466
 result_FrameCounterIRQ = $467
 result_FrameCounter4Step = $468
 result_FrameCounter5Step = $469
-result_DeltaModulationChannel = $49A
-result_DMABusConflict = $49B
-result_DMA_Plus_OpenBus = $49C
+result_DeltaModulationChannel = $46A
+result_DMABusConflict = $46B
+result_DMA_Plus_OpenBus = $46C
 
 result_PowOn_CPURAM = $0480
 result_PowOn_CPUReg = $0481
@@ -249,14 +249,9 @@ result_PowOn_PPURAM = $0482
 result_PowOn_PPUPal = $0483
 result_PowOn_PPUReset = $0484
 
-
-
-
 ;$500 is dedicated to RAM needed for tests.
-
 ;$600 is dedicated to the IRQ routine
 ;$700 is dedicated to the NMI routine.
-
 
 	;;;; ASSEMBLY CODE ;;;;
 	.org $8000
@@ -295,7 +290,7 @@ TEST_PPUResetFlag:
 	STA $2006 ; "magic address"
 	LDA #$BF
 	STA $2006 ; PPUADDR = $27BF
-	LDA #$5A ; "magic number"
+	LDA #$5A ; "magic number". All over this ROM, you will frequently see me using the value $5A for tests. That's 01011010 in binary, and I just assume that if something goes wrong, it won't stumble on that number by random chance.
 	STA $2007
 	; Okay, I'll be back in 2 frames to check on you...
 	LDX #$FF
@@ -310,6 +305,7 @@ VblLoop:
 	JSR ReadPaletteRAM
 	
 	; Let's also see if the magic number was written, to verify if the reset flag exists.
+	; It's worth noting that in its current state, this test fails on my console.
 	LDA #$6
 	STA PowerOnTest_PPUReset ; set to FAIL (error code $1) by default. Overwrite with PASS if it passes.
 	LDA #$27
@@ -362,19 +358,6 @@ ReloadMainMenu:
 	LDA #$FF
 	STA <menuCursorYPos
 	
-	;JSR PrintTextCentered
-	;.word $2100
-	;.byte "Unofficial Instructions TEST ?", $FF
-
-	;JSR Print32Bytes
-	;.word $2244
-	;.word PowerOnTest_PPUReset
-
-	;LDA #01
-	;STA result_CPUInstr
-	;LDA #02
-	;STA result_OpenBus
-
 	LDA #Low(Suite_CPUBehavior)
 	STA <suitePointer
 	LDA #High(Suite_CPUBehavior)
@@ -387,16 +370,13 @@ ReloadMainMenu:
 	JSR EnableNMI
 		
 InfiniteLoop:
-	JMP InfiniteLoop
+	JMP InfiniteLoop	; This is the spinning loop while I wait for the NMI to occur.
 ;;;;;;;;;;;;;;;;;;;;
-	
-
 	
 	.org $8100
 	; Menu Data
 
-
-
+	; Here is how the pages of tests are organized.
 TableTable:
 	.word Suite_CPUBehavior
 	.word Suite_UnofficialOps_SLO
@@ -586,7 +566,6 @@ Suite_DMATests:
 	table "Controller Strobing", $FF, result_ControllerStrobing, TEST_ControllerStrobing
 	table "APU Register Activation", $FF, result_APURegActivation, TEST_APURegActivation
 	table "DMC DMA Bus Conflicts", $FF, result_DMABusConflict, TEST_DMABusConflict
-
 	.byte $FF
 
 	;; Power On State ;;
@@ -931,10 +910,6 @@ PressStartToContinue:
 PressStartToContinue_End:
 	RTI
 	
-	
-	
-	
-	
 	.bank 1
 	.org $A000
 	
@@ -1014,13 +989,13 @@ TEST_OpenBus:
 	; Let's see how LDA $5000 works. This has 4 cycles.
 	; 1. Fetch the opcode: (The data bus now holds $AD)
 	; 2. Fetch the first operand: (The data bus now holds $00)
-	; 3. Fetch the second operand: (The data bus now holds $40)
+	; 3. Fetch the second operand: (The data bus now holds $50)
 	; 4. Read from target address:
 	;	- Since there's nothing mapped to address $5000, the data bus is left floating, and nothing changes.
-	;	- Since the value of the data bus is unchanged, it still holds the value $40, which was set during the third cycle.
+	;	- Since the value of the data bus is unchanged, it still holds the value $50, which was set during the third cycle.
 	;
 	; And that's how open bus works!
-	; Open bus is typically from $4018 to $7FFF.
+	; Open bus is typically from $4000 to $7FFF. (Except for addresses $4015 (APU_STATUS), $4016 (Controller port 1), and $4017 (Controller port 2)
 	; If the cartridge has "PRG RAM", which is typically from $6000 to $7FFF, then those addresses wouldn't be open bus since they are mapped to something.
 	; This cartridge doesn't have any PRG RAM, but I'm only going to test from the $4018 to $5FFF range.
 	; Most emulators assume that (unless specified) the cartridge has PRG RAM from $6000 to $7FFF.
@@ -1038,8 +1013,7 @@ TEST_OpenBus:
 	
 	;;; Test 2 [Open Bus]: Reading from open bus always returns the high byte of the address read. ;;;
 	; As explained above, when reading from one of these addresses, the second operand is the value that remains on the databus.
-	; so, reading from $5501 should set A to $55, as the high byte is the most recently read value.
-	
+	; so, reading from $5501 should set A to $55, as the high byte is the most recently read value.	
 	LDA $5501
 	CMP #$55
 	BNE TEST_Fail
@@ -1051,11 +1025,11 @@ TEST_OpenBus:
 	BNE TEST_Fail
 	INC <currentSubTest
 	
-	;;; Test 3 [Open Bus]: Reading from open bus with an offset crossing a page boundary. ;;;
+	;;; Test 3 [Open Bus]: Indexed addressing crossing a page boundary does not update the data bus. ;;;
 	; But the rule of "the high byte is the value returned" isn't always the case.
 	; As you can see, using an offset to cross a page boundary will not update the data bus!
 	LDY #$10
-	LDA $50F8, Y ; This offset changes the high byte of the value read, but not the data bus.
+	LDA $50F8, Y ; This offset changes the high byte of the value read, but not the data bus. (Read from $5108, the value read should be $50)
 	CMP #$50
 	BNE TEST_Fail
 	INC <currentSubTest
@@ -1064,20 +1038,21 @@ TEST_OpenBus:
 	; This is just checking to see if the controllers have the open bus bits.
 	LDA $4016
 	AND #$E0
-	CMP #$40 ; Bit 6 when reading a controller is pretty much always going to be set due to open bus.
+	CMP #$40 ; When running LDA $4016, bit 6 is likely to be set.
 	BNE TEST_Fail
 	LDA $4017
 	AND #$E0
-	CMP #$40 ; Bit 6 when reading a controller is pretty much always going to be set due to open bus.
+	CMP #$40 ; When running LDA $4017, bit 6 is likely to be set.
 	BNE TEST_Fail
+	; This next one relies on the PPU databus being implemented.
 	LDA #$F0
-	STA $2002
+	STA $2002	; Set the PPU databus to $F0
 	LDX #$17
-	LDA $3FFF, X ; dummy read $2006
+	LDA $3FFF, X ; dummy read $2006. (The data bus is now $F0) The offset moves the address bus to $4016, reading from controller 1 when the databus was $F0.
 	AND #$E0
 	CMP #$E0 ; However, in this case, the open bus bits are all set.
 	BNE TEST_Fail
-	INX
+	INX		 ; We're going to run a similar trick with controller 2, but instead of dummy reading a mirror of $2006, it will dummy read a mirror of $2007. Let's set up the ppu read buffer.
 	JSR WaitForVBlank
 	LDA #0
 	STA <dontSetPointer
@@ -1095,7 +1070,7 @@ TEST_OpenBus_ContinueTest4:    ; Anyway, that was the greatest crime against pro
 	JSR SetPPUADDRFromWord
 	.byte $24, $00
 	LDA $2007 ; empty PPU buffer
-	LDA $3FFF, X ; dummy read $2007
+	LDA $3FFF, X ; dummy read $2007 (The data bus is now $F0) The offset moves the address bus to $4017, reading from controller 1 when the databus was $F0.
 	PHA
 	JSR ResetScroll
 	PLA
@@ -1111,9 +1086,17 @@ TEST_OpenBus_ContinueTest4:    ; Anyway, that was the greatest crime against pro
 	; RTS
 	;
 	; Here's what could go wrong:
-	; Open bus behavior is faked, specifically by always returning the high byte from this address range.
+	; Open bus behavior coulkd be faked, specifically by always returning the high byte from this address range.
 	; in which case, `LSR <$56, X` will run until $5700, running `SRE <$57, X` until $5800, running `CLI` until $5900, and so on.
 	; In that case, once the PC reaches $6000, it will run RTS, however the falgs and stuff will be wrong, so we can check for that.
+	; (Granted, I already tested for that, so that shouldn't be the case if we made it this far)
+	;
+	; It's also possible the JSR instruction does things out of order, elaving hte wrong value on the data bus. I can't really predict what will happen then, but just so we're clear:
+	; Here are all the cycles of JSR.
+	; 1:
+	;
+	;
+	;
 	; 
 	; It's also possible the same thing will happen, but instead of RTS, it runs BRK. Either way, that's a fail.
 	; Since that's a possibility, set up the IRQ routine.
@@ -1510,6 +1493,9 @@ TEST_PPU_Open_Bus:
 	BNE TEST_FailPPUOpenBus2
 	INC <currentSubTest 
 	
+	LDA <$50	; This value will be $00 if you are running [PPU Open Bus], but $01 if you are running [Dummy Write Cycles], which re-runs thsi test to verify the ppu bus works as a prerequisite.
+	BNE TEST_PPU_Open_Bus_SkipDecayTest
+	
 	;;; Test 4 [PPU Open Bus]: The PPU Databus decays. ;;;
 	JSR ResetScroll
 	LDA #$FF
@@ -1523,6 +1509,7 @@ TEST_PPU_Open_Bus_60FrameStall:; wait approximately one second.
 	BNE TEST_FailPPUOpenBus2
 
 	;; END OF TEST ;;
+TEST_PPU_Open_Bus_SkipDecayTest:
 	JSR WaitForVBlank
 	JSR ResetScroll
 	LDA #01
@@ -1573,7 +1560,11 @@ TEST_DummyWrites:
 	
 	;;; Test 1 [Dummy Write Cycles]: Verify PPU Open Bus exists. ;;;
 	; This Dummy Write test relies on PPU Open Bus, so if it's not emulated we cannot check for dummy writes accurately.
+	LDA #1
+	STA <$50	; The PPU_Open_Bus test uses address $50 to skip the decay test, since that's not needed here.
 	JSR TEST_PPU_Open_Bus	; It feels pretty silly running another test inside this test.
+	LDX #1
+	STX <currentSubTest	; reset the current sub test, as running TEST_PPU_Open_Bus changed it.
 	CMP #$01				; But hey, it saves on bytes.
 	BNE TEST_FailPPUOpenBus2
 	INC <currentSubTest 
