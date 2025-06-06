@@ -422,8 +422,6 @@ TestPages:	; I just made this label for ease of searching.
 	;; CPU Behavior ;;
 Suite_CPUBehavior:
 	.byte "CPU Behavior", $FF
-	;table "CPU Instructions", 		 $FF, result_CPUInstr, DebugTest
-	table "Unofficial Instructions", $FF, result_UnofficialInstr, TEST_UnofficialInstructionsExist
 	table "ROM is not writable", 	 $FF, result_ROMnotWritable, TEST_ROMnotWritable
 	table "RAM Mirroring", 			 $FF, result_RAMMirror, TEST_RamMirroring
 	table "$FFFF + X Wraparound", 	 $FF, result_FFFF_Plus_X_Wraparound, Test_FFFF_Plus_X_Wraparound
@@ -432,6 +430,9 @@ Suite_CPUBehavior:
 	table "Dummy read cycles", 		 $FF, result_DummyReads, TEST_DummyReads
 	table "Dummy write cycles", 	 $FF, result_DummyWrites, TEST_DummyWrites
 	table "Open Bus", 				 $FF, result_OpenBus, TEST_OpenBus
+	;table "CPU Instructions", 		 $FF, result_CPUInstr, DebugTest
+	table "Unofficial Instructions", $FF, result_UnofficialInstr, TEST_UnofficialInstructionsExist
+
 	.byte $FF
 	
 	;; Unofficial Instructions: SLO ;;
@@ -1288,14 +1289,14 @@ TEST_DummyReads:
 	LDA #$F0
 	STA <$52 ; ($52) points to $3FF0
 	
-	;;; Test 1 [Dummy Read Cycles]: LDA $2002, X (where X=0) reads $2002 twice. ;;;
+	;;; Test 1 [Dummy Read Cycles]: A mirror of PPU_STATUS ($2002) will be read twice by LDA $20F2, X (where X = $10). ;;;
 	; Since reading $2002 clears bit 7 of PPUSTATUS, we can check if dummy reads are happening by running dummy reads on $2002, then checking bit 7.
-	; Let's walk through the LDA $2002, X instruction cycle by cycle.
+	; Let's walk through the LDA $20F2, X instruction cycle by cycle, where X = $10
 	; 1: fetch opcode 
 	; 2: fetch low byte
 	; 3: fetch high byte, add the X offset to the low byte
-	; 4: Read $2002, if adding the offset crosses a page boundary (in this case it did not), update the high byte.
-	; 5: Read $2002.
+	; 4: Read $2002, if adding the offset crosses a page boundary (in this case it did), update the high byte.
+	; 5: Read $2102.
 	;
 	; Focus on cycle 4. That's the dummy read.
 	
@@ -2133,7 +2134,7 @@ TEST_UnofficialInstructions_SHS_Continue:
 	LDX #$82
 	TXS
 	; The stack pointer is now $83 for this test.
-	.byte $BB ; LAE $500
+	.byte $BB ; LAE $500, Y
 	.word $0500 
 	; A = StackPointer & Immediate
 	; And then transfer A to X and StackPointer.
@@ -4228,6 +4229,8 @@ TEST_DMA_Plus_2007W:
 	; This test only has relevant results if the DMA + $2007R rest passes.
 	;;; Test 1 [DMA + $2007 Write]: The DMA + $2006 Read test passes. ;;;
 	JSR TEST_DMA_Plus_2007R
+	LDX #1
+	STX <currentSubTest
 	CMP #1
 	BNE TEST_Fail7
 	INC <currentSubTest
@@ -4274,7 +4277,17 @@ Test_FFFF_Plus_X_Wraparound:
 	CMP #$A5
 	BNE TEST_Fail8
 	INC <currentSubTest
-	;;; Test 3 [$FFFF + X Wraparound]: Branching from $FFF4 to $0050 ;;;
+	;;; Test 3 [$FFFF + X Wraparound]: STA $FFFF + X (X=1) wraps around to $0000 ;;;
+	LDA #$A5
+	STA <$00
+	LDX #$01
+	STA $FFFF,Y
+	LDA <$00
+	CMP #$A5
+	BNE TEST_Fail8
+	INC <currentSubTest
+	
+	;;; Test 4 [$FFFF + X Wraparound]: Branching from $FFF4 to $0050 ;;;
 Test_FFFF_Plus_X_PrepIRQLoop:
 	LDA TEST_OpenBus_IRQRoutine,X ; USe the same routine as the open bus IRQ. PLA 5 times, and JUMP to the fail condition.
 	STA $600, X
@@ -4300,7 +4313,7 @@ Test_FFFF_Plus_X_PrepIRQLoop:
 	INC <currentSubTest
 	
 
-	;;; Test 4 [$FFFF + X Wraparound]: Executing from $FFFF to $0000 ;;;
+	;;; Test 5 [$FFFF + X Wraparound]: Executing from $FFFF to $0000 ;;;
 	LDA #$00
 	STA <$00
 	LDA #$60
@@ -5263,7 +5276,7 @@ FAIL_MisalignedOAM_Behavior:
 	JMP FAIL_MisalignedOAM
 	
 TEST_MisalignedOAM_Behavior:
-	; Let's talk about what happens when you misalign the PPU OAM Address immediately before sprite evaluation, and hwo this changes the behavior of sprite evaluation.
+	; Let's talk about what happens when you misalign the PPU OAM Address immediately before sprite evaluation, and how this changes the behavior of sprite evaluation.
 	;;; Test 1 [Misaligned OAM Behavior]: Misaligned OAM can properly draw a sprite and trigger a sprite zero hit (Misaligned OAM "+1 behavior"). ;;;
 	; This is genuinely the exact same test as [Arbitrary Sprite Zero] test 3.
 	; If this doesn't work, then it is assumed misaligned OAM is not working at all.
@@ -5282,6 +5295,7 @@ TEST_MisalignedOAM_Behavior:
 	INC <currentSubTest	
 	
 	;;; Test 2 [Misaligned OAM Behavior]: Misaligned OAM "+4 behavior" Offset by 1" ;;;	
+	; Misaligned OAM should stay misaligned until an object's Y position is out of the range of this scanline, at which point the OAM address is incremented by 4 and bitwise ANDed with $FC.
 	
 	; In the "Arbitrary Sprite Zero" test, I said the following:
 	; 	- Depending on how the evaluation goes, modify PPUOAMAddress. Typically increment by 1 or 4. (actually "it's complicated", but that's for a different test.)
@@ -5358,7 +5372,7 @@ TEST_MisalignedOAM_P4_Y_1_Loop:
 	INC <currentSubTest	
 	
 	;;; Test 3 [Misaligned OAM Behavior]: Misaligned OAM "+5 behavior" Offset by 1 ;;;
-	; If secondary OAM is full, instead of adding 4 and bitwise ANDing with $FC, instead just add 5.
+	; If Secondary OAM is full, instead of incrementing the OAM Address by 4 and bitwise ANDing with $FC, you should instead only increment the OAM address by 5.
 	; Before this test, let's clear page 2 (with $FFs).
 	JSR ClearPage2
 	; Copy data from a look up table to address $220
@@ -6288,7 +6302,7 @@ TEST_ControllerStrobing:
 	INC <currentSubTest
 
 	;;; Test 4 [Controller Strobing]: Do controller strobes only happen when the CPU transitions from a get cycle to a put cycle? (continued) ;;;
-	; This results in a 1-cycle strobe of the controller ports,however they actually aren't strobed at all!
+	; This results in a 1-cycle strobe of the controller ports, however they actually aren't strobed at all!
 	JSR WaitForVBlank
 	LDA #2
 	STA $4014 ; sync CPU with even cycle.
@@ -6507,12 +6521,18 @@ TEST_InstructionTimingContinue:
 	TSX
 	TXS
 	TAX
+	TXA
+	TAY
+	TYA
 	DEX
+	INX
+	DEY
+	INY
 	NOP
 	JSR $500 ; run timing test.
-	LDA #$12 
+	LDA #30 
 	CMP <$61
-	BNE FAIL_InstructionTiming1 ; this should be $12.
+	BNE FAIL_InstructionTiming1 ; this should be 30.
 	INC <currentSubTest
 	
 	;;; Test C [Instruction Timing]: Does JSR take 6 cycles?  ;;;
@@ -8119,7 +8139,7 @@ FAIL_DeltaModulationChannelContinue:
 	BNE FAIL_DeltaModulationChannel2
 	INC <currentSubTest
 
-	;;; Test D [APU Delta Modulation Channel]: Looping samples should not set the IRQ flag. ;;;
+	;;; Test D [APU Delta Modulation Channel]: Looping samples should not set the IRQ flag when they loop. ;;;
 	LDA #$CF	; loop + enable IRQ flag! (and the fastest sample rate)
 	STA $4010
 	LDA #$10
@@ -8451,7 +8471,7 @@ TEST_DMC_Conflict_AnswerLoop_Famicom:
 	BNE TEST_DMC_Conflict_AnswerLoop_Famicom
 	
 TEST_DMC_Test3:
-	;;; Test 3 [DMA Bus Conflicts]: The bus conflicts exist. ;;;
+	;;; Test 3 [DMA Bus Conflicts]: The bus conflicts clears the APU Frame Counter Interrupt Flag. ;;;
 	LDA $4015	; The bus conflict will read from $4015, clearing the frame counter's interrupt flag. 
 	AND #$40
 	BNE FAIL_DMC_Conflicts	; so if this is non-zero, the flag was still set, failing the test.
