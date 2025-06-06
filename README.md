@@ -3,6 +3,18 @@ A large collection of NES accuracy tests on a single NROM cartridge.
 
 This ROM was designed for the RP2A03G CPU, and the RP2C02G PPU. Some tests might fail on hardware with a different revision.
 
+# Navigating the menus
+Use the DPad to move the cursor up or down.  
+If the cursor is at the top of the page (highlighting the current page index), pressing left and right will scroll to a new page of tests.  
+If the cursor is at the top of the page (highlighting the current page index), pressing A will run all tests on the page.  
+If the cursor is at the top of the page (highlighting the current page index), pressing Start will run all tests on the ROM, and then draw a table showing the results of every test.
+
+Examples:
+
+![Result_Table](https://github.com/user-attachments/assets/523aca93-0f43-4253-addc-9d23ae776b63)
+
+The top 3 tests on page 9 have two different acceptable results depending on the CPU revision, so the light blue number will indicate which behavior was detected.
+
 # Error Codes
 For more information, I recommend reading the fully commented assembly code for the test.
 
