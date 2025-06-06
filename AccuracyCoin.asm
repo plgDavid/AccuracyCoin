@@ -592,11 +592,11 @@ Suite_DMATests:
 	;; Power On State ;;
 Suite_PowerOnState:
 	.byte "Power On State", $FF
+	table "PPU Reset Flag", $FF, result_PowOn_PPUReset, TEST_PowerOnState_PPU_ResetFlag
 	table "CPU RAM", $FF, result_PowOn_CPURAM, TEST_PowerOnState_CPU_RAM
 	table "CPU Registers", $FF, result_PowOn_CPUReg, TEST_PowerOnState_CPU_Registers
 	table "PPU RAM", $FF, result_PowOn_PPURAM, TEST_PowerOnState_PPU_RAM
 	table "Palette RAM", $FF, result_PowOn_PPUPal, TEST_PowerOnState_PPU_Palette
-	table "PPU Reset Flag", $FF, result_PowOn_PPUReset, TEST_PowerOnState_PPU_ResetFlag
 	.byte $FF
 	
 	;; PPU VBL Timing ;;
@@ -661,7 +661,7 @@ AutomaticallyRunEntireROM_Loop2:  ; Run every test on page Y.
 AREROM_RT_CheckPage13:            ; ^
 	CPY #13                       ; ^
 	BNE AREROM_RT_NoPrintTests    ; ^
-	CPX #4                        ; ^
+	CPX #0                        ; ^
 	BEQ AREROM_RT_NoPrintTests    ; ^
 	JMP AERROP_RT_Skip
 AREROM_RT_NoPrintTests:
@@ -775,7 +775,7 @@ AREROM_PageColumnLoop2:           ; Check results of every test on the page Y.
 AREROM_CheckPage13:
 	CPY #13
 	BNE AREROM_NoPrintTests
-	CPX #4
+	CPX #0
 	BEQ AREROM_NoPrintTests
 	LDA $2007
 	JMP AERROP_Skip
@@ -1416,12 +1416,17 @@ TEST_DummyWritesPrepLoop:
 	LDY <$FE
 	RTS
 ;;;;;;;
+
+TEST_FailPPUOpenBus:
+	JSR ResetScroll
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+
 TEST_PPU_Open_Bus:
 	;;; Test 1 [PPU Open Bus]: Verify PPU Open Bus exists. ;;;
 	; Don't worry, this this is remarkably simple.
 	; Here's how PPU Open bus works.
 	; The PPU Databus is updated whenever the CPU writes to any PPU Register.
-	;
 	
 	LDX #0
 	LDY #1
@@ -1502,14 +1507,28 @@ TEST_PPU_Open_Bus:
 	LDA $2002
 	AND #$1F
 	CMP #$15
-	BNE TEST_FailPPUOpenBus
+	BNE TEST_FailPPUOpenBus2
+	INC <currentSubTest 
+	
+	;;; Test 4 [PPU Open Bus]: The PPU Databus decays. ;;;
+	JSR ResetScroll
+	LDA #$FF
+	STA $2002
+	LDX #60
+TEST_PPU_Open_Bus_60FrameStall:; wait approximately one second.
+	JSR Clockslide_29780	
+	DEX
+	BNE TEST_PPU_Open_Bus_60FrameStall
+	LDA $2000
+	BNE TEST_FailPPUOpenBus2
 
 	;; END OF TEST ;;
+	JSR WaitForVBlank
 	JSR ResetScroll
 	LDA #01
 	RTS
 ;;;;;;;
-TEST_FailPPUOpenBus:
+TEST_FailPPUOpenBus2:
 	JSR ResetScroll
 	JMP TEST_Fail
 
@@ -1556,7 +1575,7 @@ TEST_DummyWrites:
 	; This Dummy Write test relies on PPU Open Bus, so if it's not emulated we cannot check for dummy writes accurately.
 	JSR TEST_PPU_Open_Bus	; It feels pretty silly running another test inside this test.
 	CMP #$01				; But hey, it saves on bytes.
-	BNE TEST_FailPPUOpenBus
+	BNE TEST_FailPPUOpenBus2
 	INC <currentSubTest 
 	
 	; Here's how the test works.
