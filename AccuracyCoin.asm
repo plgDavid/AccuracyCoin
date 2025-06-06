@@ -6136,14 +6136,23 @@ TEST_DMA_Plus_4015R:
 	INC <currentSubTest
 
 	;;; Test 2 [DMA + $4015 Read]: Does the DMA happen at the right time? ;;;
-	JSR Clockslide_29780
-	JSR Clockslide_100
 	JSR DMASync_50CyclesRemaining
-	JSR Clockslide_47
+	LDA #$4F			;2
+	STA $4010			;4
+	LDA #$00			;2
+	STA $4017			;4
+	JSR Clockslide_29780;29780
+	JSR Clockslide_200	;100
+
+	; so far, we've ran 29892 cycles since leaving our "DMA Sync in 50 CPU cycles." subroutine.
+	; Luckily, I set the DMA to loop every 432 CPU cycles.
+	JSR Clockslide_16
 	BIT $4015	; If the frame interrupt flag is set, bit 6 will be set. (set the overflow flag) However, we time this DMA to also read this address, clearing the bit. (the overflow flag should be cleared after this BIT instruction)
 	BVS FAIL_DMA_Timing	
 	
 	;; END OF TEST ;;
+	LDA #$40
+	STA $4017
 	LDA #1
 	RTS
 ;;;;;;;
