@@ -3,6 +3,12 @@ A large collection of NES accuracy tests on a single NROM cartridge.
 
 This ROM was designed for the RP2A03G CPU, and the RP2C02G PPU. Some tests might fail on hardware with a different revision.
 
+This ROM currently has 107 tests, each composed of several smaller tests in order to print error codes narrowing down the specific issues your NES emulator might have.
+
+Here's an example of the menu in this ROM, shown on an emulator failing a few tests, passing others, and a few tests on screen haven't been ran yet. (The cursor is currently next to the "RAM Mirroring" test.)
+
+![AccuracyCoin_Page1](https://github.com/user-attachments/assets/ad0cb426-cd84-4784-8b7c-f7dcfecc882a)
+
 # Navigating the menus
 Use the DPad to move the cursor up or down.  
 If the cursor is at the top of the page (highlighting the current page index), pressing left and right will scroll to a new page of tests.  
