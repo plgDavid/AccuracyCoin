@@ -87,11 +87,12 @@ For more information, I recommend reading the fully commented assembly code for 
   1: The target address of the instruction was not the correct value after the test. (Not applicable to the "Immediate" addressing mode.)  
   2: The A register was not the correct value after the test.  
   3: The X register was not the correct value after the test.  
-  4: The Y register was not the correct Value after the test.  
+  4: The Y register was not the correct value after the test.  
   5: The CPU Status flags were not correct after the test.  
+  6: The Stack pointer was not the correct value after the test. (Only applicable to LAE)  
 
-### Unofficial Instructions: SHA, SHS, SHX, SHY
-  F: The high byte corruption did not match either known behavior. (Only applicable to SHA and SHS. Corruption with SHX and SHY is consistent across revisions.)  
+### Unofficial Instructions: SHA, SHX, SHY
+  F: The high byte corruption did not match either known behavior. (Only applicable to SHA. Corruption with SHX and SHY is consistent across revisions.)  
   0: This instruction had the wrong number of operand bytes.  
   1: The target address of the instruction was not the correct value after the test.  
   2: The A register was not the correct value after the test.  
@@ -103,6 +104,22 @@ For more information, I recommend reading the fully commented assembly code for 
   8: If the RDY line goes low 2 cycles before the write cycle, The X register was not the correct value after the test.  
   9: If the RDY line goes low 2 cycles before the write cycle, The Y register was not the correct Value after the test.  
   A: If the RDY line goes low 2 cycles before the write cycle, The CPU Status flags were not correct after the test.  
+
+ ### Unofficial Instructions: SHS
+  F: The high byte corruption did not match either known behavior.
+  0: This instruction had the wrong number of operand bytes.  
+  1: The target address of the instruction was not the correct value after the test.  
+  2: The A register was not the correct value after the test.  
+  3: The X register was not the correct value after the test.  
+  4: The Y register was not the correct Value after the test.  
+  5: The CPU Status flags were not correct after the test.  
+  6: The Stack pointer was not the correct value after the test.  
+  7: If the RDY line goes low 2 cycles before the write cycle, The target address of the instruction was not the correct value after the test.  
+  8: If the RDY line goes low 2 cycles before the write cycle, The A register was not the correct value after the test.  
+  9: If the RDY line goes low 2 cycles before the write cycle, The X register was not the correct value after the test.  
+  A: If the RDY line goes low 2 cycles before the write cycle, The Y register was not the correct Value after the test.  
+  B: If the RDY line goes low 2 cycles before the write cycle, The CPU Status flags were not correct after the test.  
+  C: If the RDY line goes low 2 cycles before the write cycle, The Stack pointer was not the correct value after the test.  
 
 ### Interrupt flag latency
   1: An IRQ should occur when a DMC sample ends, the DMC IRQ is enabled, and the CPU's I Flag is clear.  
