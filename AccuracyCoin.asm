@@ -676,7 +676,7 @@ AERROP_RT_Skip:
 	JSR DisableRendering
 	JSR ClearPage2
 	LDA #1
-	STA <$10 ; this is "currentSubTest" but since all teh tests are over, let's use this to count the number of sprites I'm adding to OAM. Set to 1 by default just to avoid sprite zero hits on the menu.
+	STA <$10 ; this is "currentSubTest" but since all the tests are over, let's use this to count the number of sprites I'm adding to OAM. Set to 1 by default just to avoid sprite zero hits on the menu.
 	LDA #0
 	STA <PostAllPassTally
 	STA <PostAllTestTally
@@ -1044,7 +1044,7 @@ TEST_OpenBus:
 	AND #$E0
 	CMP #$40 ; When running LDA $4017, bit 6 is likely to be set.
 	BNE TEST_Fail
-	; This next one relies on the PPU databus being implemented.
+	; This doubles as a test of dummy read cycles, and the PPU Databus.
 	LDA #$F0
 	STA $2002	; Set the PPU databus to $F0
 	LDX #$17
@@ -1056,9 +1056,10 @@ TEST_OpenBus:
 	JSR WaitForVBlank
 	LDA #0
 	STA <dontSetPointer
-	JSR PrintCHR
+	JSR PrintCHR	; The PrintCHR function will read the 2 byte word, and following bytes up until it reads $FF (a terminator) and then fix the return address such that RTS returns to the byte after the terminator.
 	.word $2400
 	.byte $F0, $FF
+	; PrintCHR will return here. The .word $2400 and ,byte $F0, $FF don't get executed.
 	BEQ TEST_OpenBus_ContinueTest4 ; Skip to TEST_OpenBus_ContinueTest4
 	;; If you are reading this for test 4, just ignore these next few lines. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 TEST_OpenBusA0A0:              ; This is a fail-safe for test 8. It needed to be at address $A0A0.	         ;;
@@ -1069,10 +1070,11 @@ TEST_OpenBus_ContinueTest4:    ; Anyway, that was the greatest crime against pro
 	;; And now, back to your regularly scheduled program. ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	JSR SetPPUADDRFromWord
 	.byte $24, $00
+	; SetPPUADDRFromWord will return here.
 	LDA $2007 ; empty PPU buffer
 	LDA $3FFF, X ; dummy read $2007 (The data bus is now $F0) The offset moves the address bus to $4017, reading from controller 1 when the databus was $F0.
 	PHA
-	JSR ResetScroll
+	JSR ResetScroll	; And reset the scroll, since we just moved "v" to $2400.
 	PLA
 	AND #$E0
 	CMP #$E0 ; However, in this case, the open bus bits are all set.
@@ -1091,15 +1093,18 @@ TEST_OpenBus_ContinueTest4:    ; Anyway, that was the greatest crime against pro
 	; In that case, once the PC reaches $6000, it will run RTS, however the falgs and stuff will be wrong, so we can check for that.
 	; (Granted, I already tested for that, so that shouldn't be the case if we made it this far)
 	;
-	; It's also possible the JSR instruction does things out of order, elaving hte wrong value on the data bus. I can't really predict what will happen then, but just so we're clear:
-	; Here are all the cycles of JSR.
-	; 1:
-	;
-	;
-	;
-	; 
 	; It's also possible the same thing will happen, but instead of RTS, it runs BRK. Either way, that's a fail.
 	; Since that's a possibility, set up the IRQ routine.
+	;
+	; It's also possible the JSR instruction does things out of order, leaving the wrong value on the data bus. I can't really predict what will happen then, but just so we're clear:
+	; Here are all the cycles of JSR. (Simplified. JSR is actually a super odd instruction. I recommend looking at it in visual 6502 some time.)
+	; 1: Read the opcode.
+	; 2: Read the first operand.
+	; 3: Dummy read from stack.
+	; 4: Push PC High to the stack.
+	; 5: Push PC Low to the stack.
+	; 6: Read the second operand.
+
 	LDX #0
 TEST_OpenBus_PrepIRQLoop:
 	LDA TEST_OpenBus_IRQRoutine,X ; TEST_OpenBus_IRQRoutine can be found at the end of this test. It's just a bunch of PLA's and a JMP to TEST_Fail.
@@ -1113,15 +1118,15 @@ TEST_OpenBus_PrepIRQLoop:
 	LDX #0	 ; X needs to be zero for this.
 	JSR $5600; open bus!
 	; We made it back safely
-	; if a BRK occured, or if we rolled into $8000, we failed.
-	; however, if we incorrectly executed address $6000 for the RTS, we can check for this by Loading $56
-	; Old Mesen behavior would potentially cause a crash, as the order of the JSR was incorrect, leaving the low byte of the return address on the bus, and $6000 was random bytes.
+	; if a BRK occured (possibly at $6000), or if we executed into $8000, we failed.
 	LDA <$56
 	CMP #$60
 	BNE TEST_Fail2
 	INC <currentSubTest 
 	
 	;;; Test 6 [Open Bus]: Dummy Reads update databus, test by reading $4015 ;;;
+	; On second thought... this was already tested by the controller reading test, wasn't it?
+	; Oh well.
 	; This doubles as a test of dummy read cycles, and the PPU Databus. Here's what happens.
 	; LDA $3FFF, X (X=$16)
 	; 1: fetch opcode 
@@ -1210,6 +1215,8 @@ TEST_OpenBus_PostTest8:
 TEST_Pass2:
 	LDA #1
 	RTS
+;;;;;;;
+
 TEST_OpenBus_IRQRoutine: 
 	; This is used in test 4 when we jump to open bus. If the behavior is inaccurate, a BRK is likely to run.
 	; We want to run the following code if a BRK occurs, so this gets copied to the IRQ routine in RAM.
@@ -1416,7 +1423,7 @@ TEST_PPU_Open_Bus:
 	LDA #$5A
 	STA $2002 ; Address $2002 is read-only. This puts $5A on the ppu bus.
 	TXA	  ; clear A for the test.
-	LDA $2000 ; Address $2000 is write-only, so teh value read is the value of the PPU bus. ($5A)
+	LDA $2000 ; Address $2000 is write-only, so the value read is the value of the PPU bus. ($5A)
 	CMP #$5A
 	BNE TEST_FailPPUOpenBus
 	INC <currentSubTest 
@@ -1492,12 +1499,12 @@ TEST_PPU_Open_Bus:
 	CMP #$15
 	BNE TEST_FailPPUOpenBus2
 	INC <currentSubTest 
-	
+	JSR ResetScroll
+
 	LDA <$50	; This value will be $00 if you are running [PPU Open Bus], but $01 if you are running [Dummy Write Cycles], which re-runs thsi test to verify the ppu bus works as a prerequisite.
 	BNE TEST_PPU_Open_Bus_SkipDecayTest
 	
 	;;; Test 4 [PPU Open Bus]: The PPU Databus decays. ;;;
-	JSR ResetScroll
 	LDA #$FF
 	STA $2002
 	LDX #60
@@ -1561,11 +1568,11 @@ TEST_DummyWrites:
 	;;; Test 1 [Dummy Write Cycles]: Verify PPU Open Bus exists. ;;;
 	; This Dummy Write test relies on PPU Open Bus, so if it's not emulated we cannot check for dummy writes accurately.
 	LDA #1
-	STA <$50	; The PPU_Open_Bus test uses address $50 to skip the decay test, since that's not needed here.
+	STA <$50				; The PPU_Open_Bus test uses address $50 to skip the decay test, since that's not needed here.
 	JSR TEST_PPU_Open_Bus	; It feels pretty silly running another test inside this test.
-	LDX #1
-	STX <currentSubTest	; reset the current sub test, as running TEST_PPU_Open_Bus changed it.
-	CMP #$01				; But hey, it saves on bytes.
+	LDX #1					; But hey, it saves on bytes.
+	STX <currentSubTest		; reset the current sub test, as running TEST_PPU_Open_Bus changed it.
+	CMP #$01				
 	BNE TEST_FailPPUOpenBus2
 	INC <currentSubTest 
 	
@@ -1586,9 +1593,9 @@ TEST_DummyWrites:
 	JSR ResetScrollAndWaitForVBlank
 	
 	; Let me explain this subroutine real quick.
-	; The return address is modified inside this subroutine, so it returns to the polit after the following bytes.
+	; The return address is modified inside this subroutine, so it returns to the byte after the terminator.
 	; Basically, WriteToPPUADDRWithByte will read the two bytes after it, and store them to $2006, then the third byte is stored at $2007.
-	; Then, if the following byte if $FF, exit the subroutine. Othwerwise, grab the next 3 bytes and do it again.
+	; Then, if the following byte if $FF (the terminator), exit the subroutine. Othwerwise, grab the next 3 bytes and do it again.
 	JSR WriteToPPUADDRWithByte
 	.byte $25, $4A, $5A ; VRAM[$254A] = $5A
 	.byte $25, $4B, $5C ; VRAM[$254B] = $5C
@@ -1604,6 +1611,7 @@ TEST_DummyWrites:
 	.byte $26, $25, $98 ; VRAM[$2625] = $98
 	.byte $26, $27, $4F ; VRAM[$2627] = $4F
 	.byte $FF ; Terminator.
+	; WriteToPPUADDRWithByte will return here:
 	JSR ResetScrollAndWaitForVBlank
 
 	;;; Test 2 [Dummy Write Cycles]: See if Read-Modify-Write instructions write to $2006 twice. ;;;
@@ -1696,8 +1704,9 @@ TEST_DummyWritesPt2:
 	JSR ResetScroll
 	LDA #01
 	RTS
+;;;;;;;
 
-RTS_If_Running_All_Tests:
+RTS_If_Running_All_Tests:	; The following tests should not draw anythign on screen if we're running the automatically-run-all-tests mode.
 	LDA <RunningAllTests
 	BEQ RTS_If_Running_All_Tests_Continue ; skip printing stuff on screen if we're running all tests right now.
 	PLA
@@ -2166,7 +2175,9 @@ TEST_Fail6:	; This is in the middle of the test, since it saves bytes to branch 
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
 
-TEST_VerifyInstructionIsOneByte:
+; These upcoming subroutines are used in the individual opcode tests for the unofficial isntructions.
+
+TEST_VerifyInstructionIsOneByte:	; Write the following to address $5C0: [opcode] $60, $C8, $60
 	LDA <Copy_A ; the opcode
 	STA $5C0
 	LDA #$60
@@ -2184,8 +2195,9 @@ TEST_VerifyInstructionIsOneByte:
 	BNE FAIL_WrongInstructionSize
 	LDA <Copy_A ; the opcode
 	RTS
+;;;;;;;
 
-TEST_VerifyInstructionIsTwoByte:
+TEST_VerifyInstructionIsTwoByte: ; Write the following to address $5C0: [opcode] $C8, $60
 	LDA <Copy_A ; the opcode
 	STA $5C0
 	LDA #Reserved_C8	; It's just the value $C8
@@ -2202,8 +2214,9 @@ TEST_VerifyInstructionIsTwoByte:
 	BNE FAIL_WrongInstructionSize
 	LDA <Copy_A ; the opcode
 	RTS
+;;;;;;;
 	
-TEST_VerifyInstructionIsThreeByte:
+TEST_VerifyInstructionIsThreeByte: ; Write the following to address $5C0: TXS, STX $7FF, LDX #0, [opcode], INY, INY, LDX $7FF, TXS, RTS. If those INY instructions get executed, the instruction was the wrong size. 
 	LDX #0
 TEST_VerifyInstructionIsThreeLoop:
 	LDA TEST_UnOp_ThreeByte_RamFunc, X
@@ -2223,6 +2236,7 @@ TEST_VerifyInstructionIsThreeLoop:
 	BNE FAIL_WrongInstructionSize
 	LDA <Copy_A ; the opcode
 	RTS
+;;;;;;;
 
 FAIL_WrongInstructionSize:	; We need to pull 4 different return addresses off the stack.
 	PLA
@@ -2386,10 +2400,12 @@ Test_UnOp_SetupJumpTable:
 
 
 TEST_UnOp_SetupAddrMode_Implied:
+	; I don't think there are any implied unofficial instructions, so uh... I guess we'll just ignore this label.
+
 TEST_UnOp_SetupAddrMode_Immediate:
-	LDA Test_UnOp_ValueAtAddressForTest
-	STA UnOpTest_Operand
-	JSR TEST_VerifyInstructionIsTwoByte
+	LDA Test_UnOp_ValueAtAddressForTest	; Load the operand of the immediate instruction
+	STA UnOpTest_Operand				; and store it in RAM 1 byte after where we stored the opcode.
+	JSR TEST_VerifyInstructionIsTwoByte ; Also verify the length of the instruction.
 	RTS
 
 TEST_UnOp_SetupAddrMode_IndX:
@@ -2559,10 +2575,10 @@ TEST_PrepAXYForTest:
 ;;;;;;;
 
 TEST_UnOpRunTest:
-	JSR TEST_PrepAXYForTest
+	JSR TEST_PrepAXYForTest	; Set up X and Y for the indexing offsets.
 	LDA <$FF ; the opcode
 	JSR TEST_UnOp_SetupByAddressingMode ; Set up the operands around $580
-	JSR TEST_PrepAXYForTest
+	JSR TEST_PrepAXYForTest	; Set up A, X, and Y for the initial values of the test.
 	STA <Copy_A
 	STX <Copy_X
 	JSR $0580	; Run the test!
@@ -2593,20 +2609,6 @@ Test_UnOpEvaluateResults_StartA:
 	BNE FAIL_UnOpTest ; Error code 5: The result of the flags were incorrect
 	RTS ; Pass!
 FAIL_UnOpTest:
-	; Uncomment this to print the value that failed, and the expected value. Really only works for error 1.
-	;PHA
-	;JSR WaitForVBlank
-	;LDA #$23
-	;STA $2006
-	;LDA #$70
-	;STA $2006
-	;PLA
-	;JSR PrintByte
-	;LDA #$24
-	;STA $2007
-	;LDA <Test_UnOp_ValueAtAddressResult
-	;JSR PrintByte
-
 	PLA	; Pull of the Return Address
 	PLA	;
 	PLA
@@ -2757,9 +2759,6 @@ TEST_ImmOperandAXYF_PreLoop2:
 ;Test_UnOp_IndirectPointerLo = $30
 ;Test_UnOp_IndirectPointerHi = $31
 
-
-
-
 TEST_SLO_03:
 	LDA #$03
 	BNE TEST_SLO
@@ -2785,6 +2784,10 @@ TEST_SLO:
 	
 	; A lot of these unofficial instruction tests will tell you to "see TEST_SLO" for an explanation. Here it is!
 	
+	; First of all, the test happens in RAM around address $580.
+	; The instruction we are testing for begins at address $593.
+	; If your emulator has some debug tools, (Or if it doesn't, your IDE probably does...) consider setting a breakpoint when the program counter is at address $593.
+	;	
 	; The ASM code in this section might look a little confusing...
 	; These JSR instructions lead to subroutines that modify the return address
 	; so the .word and .byte parts don't get executed.
@@ -2808,12 +2811,12 @@ TEST_SLO:
 	; Then, the value of the status flags are compared with rflags. (If they don't match, return error code 5)
 	
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $0500
-	.byte $40
-	.byte $01, $64, $45, (flag_i | flag_c | flag_z)
-	.word $0500
-	.byte $80
-	.byte $81, $64, $45, (flag_i | flag_n)
+	.word $0500                                     ; Initialize address $500 with...
+	.byte $40                                       ; a value of $40.
+	.byte $01, $64, $45, (flag_i | flag_c | flag_z) ; A=$01, X=$64, Y=$45, Flags = I|C|Z
+	.word $0500                                     ; Then, after the test runs, check address $500...
+	.byte $80                                       ; for a value of $80.
+	.byte $81, $64, $45, (flag_i | flag_n)          ; Check if A=$81, X=$64, Y=$45, and flags = I|N
 	; SLO ;
 	; Let's walk through this one for the sake of documentation.
 	; $0500 = $40, A = $01
@@ -2826,20 +2829,20 @@ TEST_SLO:
 	; So in this case, the negative flag is set, carry is cleared, and zero is cleared.	
 	
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $057F
-	.byte $FF
-	.byte $00, $21, $9E, (flag_i | flag_v)
-	.word $057F
-	.byte $FE
-	.byte $FE, $21, $9E, (flag_i | flag_n | flag_c | flag_v)
+	.word $057F                                              ; Initialize address $57F with...
+	.byte $FF                                                ; a value of $FF.
+	.byte $00, $21, $9E, (flag_i | flag_v)                   ; A=$00, X=$21, Y=$9E, Flags = I|V
+	.word $057F                                              ; Then, after the test runs, check address $57F...
+	.byte $FE                                                ; for a value of $FE.
+	.byte $FE, $21, $9E, (flag_i | flag_n | flag_c | flag_v) ; Check if A=$FE, X=$21, Y=$9E, and flags = I|N|C|V
 	
 	JSR TEST_RunTest_AddrInitAXYF
-	.word $05FF
-	.byte $00
-	.byte $00, $FF, $FF, (flag_i | flag_c)
-	.word $05FF
-	.byte $00
-	.byte $00, $FF, $FF, (flag_i | flag_z)	
+	.word $05FF                            ; Initialize address $5FF with...
+	.byte $00                              ; a value of $00.
+	.byte $00, $FF, $FF, (flag_i | flag_c) ; A=$00, X=$FF, Y=$FF, Flags = I|C
+	.word $05FF                            ; Then, after the test runs, check address $5FF...
+	.byte $00                              ; for a value of $00.
+	.byte $00, $FF, $FF, (flag_i | flag_z) ; Check if A=$00, X=$FF, Y=$FF, and flags = I|Z
 	; This one really doesn't have any wild edge cases or anything.
 	; it's probably a safe bet to assume if your emulator made it this far, then it's good.	
 	;; END OF TEST ;;
@@ -3010,9 +3013,7 @@ TEST_RRA:
 	.word $05E1
 	.byte $90
 	.byte $20, $7B, $F2, (flag_i | flag_v | flag_c)
-
-
-
+	
 	;; END OF TEST ;;
 	LDA #1
 	RTS
@@ -3225,6 +3226,13 @@ TEST_ISC:
 
 
 TEST_SHA_93:
+	; Okay, this one needs an explanation.
+	; Per my research, it would appear early RP2A03G revision CPU's (and earlier) have slightly different behavior than late RP2A03G revision CPU's (and later)
+	; I call the early revision behavior "Behavior 1", and the late revision beahvior "Behavior 2."
+	; The big difference here is the "corruption" of the high byte when the Y register indexes beyond a page boundary.
+	; With behavior 1, the high byte of the address bus is bitwise ANDed with A AND X.
+	; With behavior 2, the high byte of the address bus is bitwise ANDed with X. (The A register doesn't have any affect on this high byte corruption with behavior 2.)
+	; It is currently unknown if behavior 1 has a "Magic Number", but it is known that behavior 2 definitely does.
 	LDA #PostDMACyclesUntilTestInstruction+3
 	STA <Test_UnOp_CycleDelayPostDMA	
 	; Since we need to run this instruction to determine the behavior *before* running a series of tests, let's first confirm this instruction's length in bytes.
@@ -3235,12 +3243,13 @@ TEST_SHA_93:
 	BEQ  TEST_SHA_93_CorrectLength
 	LDA #2	; error code 0.
 	RTS
+;;;;;;;
 	
 TEST_SHA_93_CorrectLength:
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
 	LDA #$FF
 	STA <$00 ; For checking behavior 1
-	STA $0A00 ; For checking behavior 2
+	STA $0A00; For checking behavior 2
 	LDA #$F0
 	STA <Test_UnOp_IndirectPointerLo
 	LDA #$1E
@@ -3259,6 +3268,7 @@ TEST_SHA_93_CorrectLength:
 	BEQ TEST_SHA_Behavior1_93_JMP ; if address $0000 was updated, this is behavior 1.
 	LDA #$3E ; (Error code F) And if address $1F00 was changed, or of nothing happened at all, this failed.
 	RTS		 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
+;;;;;;;
 	
 TEST_SHA_Behavior2_93_JMP:
 	JMP TEST_SHA_Behavior2_93
@@ -3266,6 +3276,7 @@ TEST_SHA_Behavior1_93_JMP:
 	JMP TEST_SHA_Behavior1_93
 	
 TEST_SHA_9F:
+	; See TEST_SHA_93 for an explanation.
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
 	; Since we need to run this instruction to determine the behavior *before* running a series of tests, let's first confirm this instruction's length in bytes.
@@ -3276,6 +3287,7 @@ TEST_SHA_9F:
 	BEQ  TEST_SHA_9F_CorrectLength
 	LDA #2	; error code 0.
 	RTS
+;;;;;;;
 	
 TEST_SHA_9F_CorrectLength:
 	
@@ -3297,6 +3309,7 @@ TEST_SHA_9F_CorrectLength:
 	BEQ TEST_SHA_Behavior1_9F_JMP ; if address $0000 was updated, this is behavior 1.
 	LDA #$3E ; (Error code F) And if address $1F00 was changed, or of nothing happened at all, this failed.
 	RTS 	 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
+;;;;;;;
 	
 TEST_SHA_Behavior2_9F_JMP:
 	JMP TEST_SHA_Behavior2_9F
@@ -3417,6 +3430,7 @@ TEST_SHA_Behavior1_SkipPrints:
 ;; END OF TEST ;;
 	LDA #5	; Pass, "code 1"
 	RTS
+;;;;;;;
 	
 TEST_SHA_Behavior2_93
 	LDA #$93
@@ -3502,13 +3516,14 @@ TEST_SHA_Behavior2_SkipPrints:
 	;; END OF TEST ;;
 	LDA #9	; Pass, "code 2"
 	RTS
-
+;;;;;;;
 
 TEST_SHS_9B:
+	; See TEST_SHA_93 for more information.
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
 	; Determine if this instruction is using behavior 1 or 2. (or not implemented)
-		; Since we need to run this instruction to determine the behavior *before* running a series of tests, let's first confirm this instruction's length in bytes.
+	; Since we need to run this instruction to determine the behavior *before* running a series of tests, let's first confirm this instruction's length in bytes.
 	; This is SHS Absolute, which is 3 bytes long.
 	TSX
 	STX <Copy_SP
@@ -3520,8 +3535,10 @@ TEST_SHS_9B:
 	TXS
 	LDA #2	; error code 0.
 	RTS
+;;;;;;;
 	
 TEST_SHS_9B_CorrectLength:
+	; Whichever choice of behavior your emulator used for SHA, (behavior 1 vs behavior 2) you should use the same choice of behavior for the SHS instruction. (behavior 1 or behavior 2)
 	LDX <Copy_SP
 	TXS
 	LDA #$FF
@@ -3545,12 +3562,12 @@ TEST_SHS_9B_CorrectLength:
 	BEQ TEST_SHS_Behavior1_9B ; if address $0000 was updated, this is behavior 1.
 	LDA #$3E ; (Error code F) And if address $1F00 was changed, or of nothing happened at all, this failed.
 	RTS		 ; (If address $1F00 ($700) was updated, that value gets fixed before the NMI occurs.)
+;;;;;;;
 	
 TEST_SHS_Behavior2_9B_JMP:
 	JMP TEST_SHS_Behavior2_9B
 	
 TEST_SHS_Behavior1_9B:
-
 	LDA <RunningAllTests
 	BNE TEST_SHS_Behavior1_SkipPrints
 	LDA #0
@@ -3649,6 +3666,8 @@ TEST_SHS_Behavior1_SkipPrints:
 ;; END OF TEST ;;
 	LDA #5	; Pass "code 1"
 	RTS
+;;;;;;;
+
 TEST_SHS_Behavior2_9B:
 	LDA <RunningAllTests
 	BNE TEST_SHS_Behavior2_SkipPrints
@@ -3717,10 +3736,10 @@ TEST_SHS_Behavior2_SkipPrints:
 	.byte $8F
 	.byte $8F, $FF, $00, (flag_i), $8F
 
-
 ;; END OF TEST ;;
 	LDA #9	; Pass "code 2"
 	RTS
+;;;;;;;
 
 TEST_SHY_9C:
 	LDA #PostDMACyclesUntilTestInstruction+4
@@ -3776,6 +3795,7 @@ TEST_SHY_9C:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
+;;;;;;;
 
 TEST_SHX_9E:
 	LDA #PostDMACyclesUntilTestInstruction+4
@@ -4006,7 +4026,7 @@ TEST_LXA_AB:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
-	
+;;;;;;;
 	
 TEST_AXS_CB:
 	LDA #$CB
@@ -4036,6 +4056,7 @@ TEST_AXS_CB:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
+;;;;;;;
 
 TEST_SBC_EB:
 	LDA #$EB
@@ -4065,6 +4086,7 @@ TEST_SBC_EB:
 	;; END OF TEST ;;
 	LDA #1
 	RTS
+;;;;;;;
 
 TEST_MAGIC:
 	; The ANE and LXA instructions have "magic values".
@@ -4076,16 +4098,14 @@ TEST_MAGIC:
 	CPX #0
 	BEQ TEST_MAGIC_Continue
 	LDA #2 ; error code 0
-	RTS
-	
+	RTS	
 TEST_MAGIC_Continue:
 	LDA #$FF
 	.byte $AB, $E8
 	CPX #1
 	BNE TEST_MAGIC_Continue2
 	LDA #2 ; error code 0
-	RTS
-	
+	RTS	
 TEST_MAGIC_Continue2:
 	LDA <RunningAllTests
 	BEQ TEST_MAGIC_Continue3 ; skip printing stuff on screen if we're running all tests right now.
@@ -4113,6 +4133,7 @@ TEST_MAGIC_Continue3:
 	JSR ResetScroll
 	LDA #1
 	RTS
+;;;;;;;
 
 TEST_DMA_Plus_OpenBus:
 	JSR DMASync_50CyclesRemaining	; sync DMA
@@ -4250,7 +4271,7 @@ Test_FFFF_Plus_X_PrepIRQLoop:
 	CPX #8
 	BNE Test_FFFF_Plus_X_PrepIRQLoop
 	; Some emulators might implement this poorly, such that executing beyond address $FFFF crashes or maybe executes all zeroes? So let's set up the IRQ routine in case a BRK runs.
-	
+	; I have no idea what Wii VC is doing here, but it just crashes. Notably, it would pass test 4 if it made it that far, though braches specifically break it.
 	LDA #$E6
 	STA <$50
 	LDA #$55
@@ -4350,6 +4371,7 @@ TEST_Fail9:
 TEST_VBlank_Beginning_Expected_Results:
 	;				     $00 is also acceptable in the fourth byte (byte 3), depending on CPU/PPU clock alignment.
 	.byte $02, $02, $02, $02, $00, $01, $01
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 TEST_VBlank_End:
 	;;; Test 1 [VBLank Beginning]: Tests the timing of the $2002 Vblank flag ;;;
@@ -4571,7 +4593,7 @@ TEST_NMI_Timing_End:
 TEST_NMI_Timing_Expected_Results:
 	; With a single CPU/PPU clock alingment, this will be off by 1, starting at the $02 instead of the $03.
 	.byte $03,$02,$02,$02,$02,$02,$02,$01,$01,$01,$01
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 TEST_NMI_Suppression:
 	JSR PrepNMI_TimingTests
@@ -4614,6 +4636,7 @@ TEST_NMI_Suppression_End:
 	LDA #1
 	RTS
 ;;;;;;;
+
 TEST_NMI_Suppression_Expected_Results:
 	; With a single CPU/PPU clock alingment, this will be off by 1, starting at the $02 instead of the $03.
 		;skip reading the FF bytes. it could be 00 or 02. The final FF could be 01/03.
@@ -4660,7 +4683,7 @@ TEST_NMI_VBL_End_Loop2:
 
 TEST_NMI_VBL_End_Expected_Results:
 	.byte $01, $01, $01, $00, $00, $00, $00
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 TEST_NMI_Disabled_VBL_Start:
 	JSR PrepNMI_TimingTests
@@ -4697,10 +4720,12 @@ TEST_NMI_Disabled_VBL_Skip:
 	LDA #1
 	RTS
 ;;;;;;;
+
 	FAIL_NMI_Disabled_VBL_Start:
 	JSR DisableNMI
 	JMP TEST_Fail
 ;;;;;;;;;;;;;;;;;
+
 TEST_NMI_Disabled_VBL_Start_Expected_Results:
 						; This $FF could be a 00, or a 01, so skip it in the evaluation.
 	.byte $00, $00, $00, $FF, $01, $01, $01
@@ -4721,6 +4746,7 @@ PREP_SpriteZeroHit:
 	JSR WaitForVBlank
 	RTS
 ;;;;;;;
+
 FAIL_Sprite0Hit_Behavior1:
 	JMP FAIL_Sprite0Hit_Behavior
 
@@ -4931,7 +4957,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	BNE FAIL_Sprite0Hit_Behavior2
 	INC <currentSubTest	
 	
-	;;; Test E [Sprite Zero Hit Behavior]: The sprite zero hit flag is not set until the PPU cycle in which the dot in drawn. ;;;
+	;;; Test E [Sprite Zero Hit Behavior]: The sprite zero hit flag is not set until the PPU cycle in which the dot is drawn. ;;;
 	JSR WaitForVBlank
 	JSR InitializeSpriteZero
 	;    YPos, CHR, Att, XPos
@@ -4939,7 +4965,7 @@ TEST_Sprite0Hit_Behavior_Continued:
 	JSR DisableRendering
 	LDA #0
 	JSR VblSync_Plus_A
-	; the sprite zero hit will occur at X=254 of scanline 1. (cycle 255 of scanline 1, since the screen isn't rendering until cycle 1)
+	; The sprite zero hit will occur at X=254 of scanline 1. (cycle 255 of scanline 1, since the screen isn't rendering until cycle 1)
 	; We are now synced with dot 1 of scanline 241. (Scanline 261 is the final one before looping back to scanline 0)
 	; Every scanline is 341 PPU cycles.
 	; (21 scanlines plus scanline 0) * PPU cycles per line + cycles into line 1 before the sprite zero hit =
@@ -4976,7 +5002,7 @@ FAIL_ArbitrarySpriteZero1:
 	JMP FAIL_ArbitrarySpriteZero
 
 TEST_ArbitrarySpriteZero:
-	;;; Test 1 [Arbitrary Sprite Zero]: Sprite 0 should trigger sprite zero hit. No other sprite should. ;;;
+	;;; Test 1 [Arbitrary Sprite Zero]: Sprite 0 should trigger a sprite zero hit. No other sprite should. ;;;
 	JSR PREP_SpriteZeroHit
 	JSR EnableRendering_S ; start rendering sprites!
 	LDA #02
@@ -5004,19 +5030,20 @@ TEST_ArbitrarySpriteZeroLoop:
 	INC <currentSubTest	
 	
 	;;; Test 2 [Arbitrary Sprite Zero]: The first processed sprite of a scanline is treated as "sprite zero". ;;;
-	; This test is a bit tricky to understand.
+	; This test is a bit tricky to understand. Let's break down the sprite evaluation process by which ppu cycles in a scanline are doing which task.
 	; PPU cycle >= 1 && PPU cycle <= 64: clear Secondary-OAM.
 	; PPU cycle >= 65 && PPU cycle <= 256: Sprite evaluation
 	; PPU cycle >= 257 && PPU cycle <= 320: Shift register initialization. (Every one of these cycles also clears PPUOAMAddress to 0.)
 	;
 	; Keep in mind, on scanline n, we're processing the OAM data in preparation for scanline n+1.
+	; (So the sprites drawn on, for example, scanline 6 were evaluated during the rendering of scanline 5.)
 	;
-	; Let's take a deep look into how Sprite Evaluation works on any given scanline.
+	; Let's take a deep look into how Sprite Evaluation works on any given scanline. (PPU cycle >= 65 && PPU cycle <= 256)
 	; for odd ppu cycles: read index "PPUOAMAddress" of OAM. Let's call the value read "S"
 	;	- "PPUOAMAddress" is the value set by writing to $2003.
 	;	- for our example here, assume PPUOAMAddress is zero, reset during the shift register init from the previous scanline.
 	; for even cycles: Evaluate "S" and determine if this sprite should be drawn on the next scanline.
-	;	-Depending on how the evaluation goes, modify PPUOAMAddress. Typically increment by 1 or 4. (actually "it's complicated", but that's for a different test.)
+	;	- Depending on how the evaluation goes, modify PPUOAMAddress. Typically increment by 1 or 4. (actually "it's complicated", but that's for a different test.)
 	; Let's focus on the even cycles.
 	; First of all, if Secondary-OAM is full, the behavior is different. Let's focus on when Secondary-OAM is not full.
 	; STEP 1: Check that the Y position of this object is in range of this scanline.
@@ -5052,7 +5079,7 @@ TEST_ArbitrarySpriteZeroLoop:
 	; Since this test is a doozy, I will comment every line and explain why I'm doing this.
 	JSR ClearPage2				; Let's clear page 2. I'm using page 2 for the OAM DMA, so OAM will be a copy of $200 - $2FF
 	JSR WaitForVBlank			; Wait for VBlank. I'm going to disable rendering next, and I'd prefer if I waited for VBlank to do that.
-	JSR DisableRendering		; Rendering is now disabled. Rendering needs to be disabled for this next subroutine to work properly.
+	JSR DisableRendering		; Rendering is now disabled. Rendering needs to be disabled for the upcoming VblSync_Plus_A subroutine to work properly.
 	LDX #32						; Let's initialize Sprite 32 at screen coordinates ($08, $00)
 	JSR InitializeSpriteX		; This subroutine reads the following 4 bytes, and adjusts the return address accordingly, so the following 4 bytes are not executed.
 	.byte $00, $FC, $00, $08	; Y Position, Pattern Table Index, Attributes, X position  
@@ -5228,9 +5255,17 @@ TEST_MisalignedOAM_Behavior:
 	; Let's talk about what happens when you misalign the PPU OAM Address immediately before sprite evaluation, and hwo this changes the behavior of sprite evaluation.
 	;;; Test 1 [Misaligned OAM Behavior]: Misaligned OAM can properly draw a sprite and trigger a sprite zero hit (Misaligned OAM "+1 behavior"). ;;;
 	; This is genuinely the exact same test as [Arbitrary Sprite Zero] test 3.
-	; If this doesn't work, then It is assumed misaligned OAM is not working at all.
+	; If this doesn't work, then it is assumed misaligned OAM is not working at all.
 	JSR PREP_SpriteZeroHit			
 	JSR MisalignedOAM_SpriteZeroTest
+	LDX #1
+	STX <currentSubTest
+	CMP #1
+	BNE FAIL_MisalignedOAM_Behavior
+	; Thsi test also relies on proper Sprite Overflow Flag emulation, so let's check that one too.
+	JSR TEST_SprOverflow_Behavior
+	LDX #1
+	STX <currentSubTest
 	CMP #1
 	BNE FAIL_MisalignedOAM_Behavior
 	INC <currentSubTest	
@@ -5271,6 +5306,10 @@ TEST_MisalignedOAM_Behavior:
 	; If the behavior does not match the console, then the data processed will intentionally be set up such that the sprite overflow flag doesn't get set.
 	
 	; To assist in debugging, the sprite evaluation for all of these tests will occur on scanline 0, and will be the first objects evaluated, starting at dot 65.
+	
+	; So to recap in simpler terms,
+	; If the value read as the Y position *is* in range, just add 1 to the OAM address.
+	; If the value read as the Y position is *not* in range, just add 4 to tha OAM address and bitwise AND the OAM address with $FC.
 	
 	; Before this test, let's clear page 2 (with $FFs).
 	JSR ClearPage2
@@ -5348,7 +5387,7 @@ TEST_MisalignedOAM_P5_Y_1_Loop:
 	; In the "Arbitrary Sprite Zero" test, I said the following:
 	;	- There's actually some wild stuff going on with the X position, but that's for a different test.
 	; Now it's time to test for this!
-	; When evaluating the X position of an object, it also makes the same "in range of scanline" calculation that th Y position makes.
+	; When evaluating the X position of an object, it also makes the same "in range of scanline" calculation that the Y position makes.
 	; It's a bit confusing to explain, so let me recap.
 	; In the "Arbitrary Sprite Zero" test, I specifically stated:
 	; 	- for odd ppu cycles: read index "PPUOAMAddress" of OAM. Let's call the value read "S"...
@@ -10569,9 +10608,11 @@ DMASync40_Loop:
 	; so we have 50 cycles to go.
 		
 DMASyncWithoutOpenBus:
-	; This fuction *should* exit with exactly 406 CPU cycles until the DMA occurs.
-	; It's a very slightly modified version of the DMA sync routine made by blargg in 2005.
+	; This function *should* exit with exactly 406 CPU cycles until the DMA occurs.
+	; It's a very slightly modified version of the DMA sync routine made by blargg in 2005. (This version has an exit condition in case the DMA timing is so off that it would loop forever.)
 	; It doesn't rely on reading open bus, rather is just simply relies on perfectly timed DMAs, and the 3 or 4 cpu cycle delay after writing to $4015.
+	; It's worth noting that function *is* consistent on hardware, and it does work. However, despite this, a lot of emulators have incorrect timing for reads from $4015, and won't actually be in sync after this runs.
+	; Hence the existence of the open bus DMA Sync routine, but wouldn't you know it- even fewer emulators implement the DMC DMA updating the data bus, so... not much I can do about that.
 	LDX #0
     LDA #$80	; Sloest Speed
     STA $4010	; Also enable the DMC IRQ
@@ -10794,7 +10835,7 @@ TEST_DoesTheDMA_Fail:
 	JMP DMASync
 ;;;;;;;;;;;;;;;	
 	
-VblSync: ; 
+VblSync: ; sync the CPU to vblank.
 	PHA
 	SEI
 	LDA #0
