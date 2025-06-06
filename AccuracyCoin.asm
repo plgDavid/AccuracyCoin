@@ -1,5 +1,18 @@
-
+	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	;;              AccuracyCoin               ;;
+	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	
+	; This ROM is a collection of accuracy tests on an NROM cartridge.
+	; NOTE: While most of these tests are universal to all revisions of the NES board, CPU, and PPU, there are a handful of tests that are not going to pass on all revisions.
+	; To be more specific, these tests were designed for an RP2A03G APU/CPU, and an RP2C02G PPU.
+	; Additionally, if you run this ROM on your console with a flash cart, you might fail some tests. Notably, the open bus tests fail on an Everdrive N8 Pro.
+	
+	; If you are looking for a specific test, consider CRTL + F searching for "TestPages:", as thats where the list of tests is.
+	; The format for the tests as they are stored in the ROM is:
+	; table "Name of test", $FF, Address_To_Store_Test_Results, Address_To_Jump_To_In_Order_To_Run_The_Test
+	; so to easily find the code for a test, you can search for the "Address_To_Jump_To_In_Order_To_Run_The_Test:" routine for a given test.
+	
+	; NOTE: The NMI and IRQ vectors both point to RAM. This allows me to create tests that have different NMI/IRQ routines.
 	
 	;;;; HEADER AND COMPILER STUFF ;;;;
 	.inesprg 2  ; 2 banks
@@ -13,9 +26,7 @@ flag_z = $2
 flag_i = $4
 flag_d = $8
 flag_v = $40
-flag_n = $80
-	
-	
+flag_n = $80	
 	
 byte0 = $0
 byte1 = $1
@@ -264,8 +275,8 @@ OpenBusTestFakedOpenBusBehavior:
 CannotWriteToROM_01:
 	.byte $01; This value is used in the "Cannot write to ROM" test.
 	
-RESET:
-	STA PowerOn_A
+RESET:	; This ROM, despite the guidance of the NesDev Wiki's "startup code", writes a bunch of uninitialized registers, and reads uninitialized RAM. Intentionally.
+	STA PowerOn_A	; For use in TEST_PowerOnState_CPU_Registers
 	STY PowerOn_Y
 	STX PowerOn_X
 	TSX
@@ -397,7 +408,6 @@ TableTable:
 	.word Suite_PPUMisc
 EndTableTable:
 
-
 	; I'm not a huge fan of using macros in this ROM, since they make the asm code look different than the compiled bytes, and thus harder to debug.
 	; This macro is just a series of bytes and words though, so it's not too hard to read.
 table .macro
@@ -406,6 +416,8 @@ table .macro
 	.word \3
 	.word \4
 	.endm
+
+TestPages:	; I just made this label for ease of searching.
 
 	;; CPU Behavior ;;
 Suite_CPUBehavior:
@@ -552,7 +564,6 @@ Suite_APUTiming:
 	table "Frame Counter 4-step", $FF, result_FrameCounter4Step, TEST_FrameCounter4Step
 	table "Frame Counter 5-step", $FF, result_FrameCounter5Step, TEST_FrameCounter5Step
 	table "Delta Modulation Channel", $FF, result_DeltaModulationChannel, TEST_DeltaModulationChannel
-
 	.byte $FF
 	
 	;; DMA Tests ;;
