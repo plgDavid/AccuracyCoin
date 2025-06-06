@@ -72,6 +72,7 @@ PostAllTestScreen = $36
 PostAllTestTally = $37
 PostAllPassTally = $38
 PrintDecimalTensCheck = $39
+result_VblankSync_PreTest = $3A
 
 
 PostDMACyclesUntilTestInstruction = 14
@@ -353,6 +354,8 @@ ReloadMainMenu:
 	STA $6001 ; Though I would prefer if this was a NES 2.0 cartridge without any PRG RAM, so writing here might do nothing anyway.
 	STA $6002 ; There's still a good chance an emulator doesn't support NES 2.0 and just puts PRG RAM here anyway.
 	
+	JSR WaitForVBlank
+	JSR TEST_VblankSync_PreTest; ; Initialize result_VblankSync_PreTest
 	JSR DMASync ; Initialize result_DMADMASync_PreTest
 	
 	
@@ -649,7 +652,19 @@ AutomaticallyRunEntireROM_Loop:
 	JSR SetUpSuitePointer         ; Set up the suite pointer.
 	JSR LoadSuiteMenuNoRendering  ; Set up the menuHeight, and all the pointers for these tests and results.
 	LDX #0
-AutomaticallyRunEntireROM_Loop2:  ; Run every test on the page Y.
+AutomaticallyRunEntireROM_Loop2:  ; Run every test on page Y.
+	CPY #9                        ; Skip running the few tests that don't actaully test for anything.
+	BNE AREROM_RT_CheckPage13     ; Some tests just print data on screen, and always return "PASS"
+	CPX #8                        ; These are ignored in the tally.
+	BNE AREROM_RT_NoPrintTests	  ; ^
+	JMP AERROP_RT_Skip            ; ^
+AREROM_RT_CheckPage13:            ; ^
+	CPY #13                       ; ^
+	BNE AREROM_RT_NoPrintTests    ; ^
+	CPX #4                        ; ^
+	BEQ AREROM_RT_NoPrintTests    ; ^
+	JMP AERROP_RT_Skip
+AREROM_RT_NoPrintTests:
 	STX <menuCursorYPos           ; The "menuCursorYPos" variable is used inside RunTest to determing what code to run.
 	JSR RunTest                   ; Run the test at index X of page Y.
 	JSR WaitForVBlank
@@ -665,6 +680,7 @@ AutomaticallyRunEntireROM_Loop2:  ; Run every test on the page Y.
 	JSR ResetScroll
 	PLA
 	TAX
+AERROP_RT_Skip:
 	INX                           ; increment X until X=MenuHeight.
 	CPX <menuHeight
 	BNE AutomaticallyRunEntireROM_Loop2
@@ -748,7 +764,22 @@ AREROM_PageColumnLoop1:
 	ADC #08
 	STA $2006
 	LDX #0
-AREROM_PageColumnLoop2:           ; Run every test on the page Y.
+AREROM_PageColumnLoop2:           ; Check results of every test on the page Y.
+	; Check for the "print" tests, like "CPU RAM at power on", which isn't really testing anything. These don't need to be counted.
+	CPY #9
+	BNE AREROM_CheckPage13
+	CPX #8
+	BNE AREROM_NoPrintTests	
+	LDA $2007
+	JMP AERROP_Skip
+AREROM_CheckPage13:
+	CPY #13
+	BNE AREROM_NoPrintTests
+	CPX #4
+	BEQ AREROM_NoPrintTests
+	LDA $2007
+	JMP AERROP_Skip
+AREROM_NoPrintTests:
 	INC <PostAllTestTally
 	STX <Copy_X
 	TXA
@@ -810,14 +841,16 @@ AREROM_PrintFail:
 	STA $2007
 AERROP_Next:
 	LDX <Copy_X
+AERROP_Skip:
 	INX                           ; increment X until X=MenuHeight.
 	CPX <menuHeight
 	BNE AREROM_PageColumnLoop2
 	                              ; That was all the tests on page Y.
 	INY                           ; Y++
 	CPY #((EndTableTable - TableTable)/2) ; Compare Y with the total page count.
-	BNE AREROM_PageColumnLoop1    ; And loop if there are more pages to run.
-		
+	BEQ AREROM_PageColumnLoopEnd    ; And loop if there are more pages to run.
+	JMP AREROM_PageColumnLoop1
+AREROM_PageColumnLoopEnd:
 	LDA #0
 	STA $2000	; keep NMI disabled, but set the increment mode back to 1.
 	; and set up attributes for this table.
@@ -4149,7 +4182,14 @@ TEST_DMA_Plus_2007W:
 	; VRAM will read 0 1 2 3 4
 	; The STA $2007 instruction has 3 read cycles, then a write cycle.
 	; [Opcode] [Operand1] [Operand2] [Write $2007]
-	; However, DMC DMA's cannot interrupt a write cycle! Therefore, the address bus cannot be $2007 during the DMA, so nothing unusual happens!
+	; However, DMC DMA's cannot interrupt a write cycle! Therefore, the address bus cannot be $2007 during the DMA, so nothing unusual happens!	
+	; This test only has relevant results if the DMA + $2007R rest passes.
+	;;; Test 1 [DMA + $2007 Write]: The DMA + $2006 Read test passes. ;;;
+	JSR TEST_DMA_Plus_2007R
+	CMP #1
+	BNE TEST_Fail7
+	INC <currentSubTest
+
 	JSR TEST_DMA_Plus_2007_Prep	; the v register is now at 2401
 	JSR DMASync_50CyclesRemaining	; sync DMA
 	; We have 50 CPU cycles until the DMA occurs.
@@ -4158,7 +4198,7 @@ TEST_DMA_Plus_2007W:
 	STA $2007 ; <------- [Opcode] [Operand1] [Operand2] [DMA attempts, but fails. Write] [Opcode (NOP)] [*DMA*]
 	NOP 	  ; The DMA occurs inside this NOP, if your emulator is timing it right.
 	NOP		  ; And the v register is now at $2402. It was not incremented extra times in the DMA, so LDA $2007 read the expected value.
-	;;; Test 1 [DMA + $2007 Write]: The v register should be at $2402 ;;;
+	;;; Test 2 [DMA + $2007 Write]: The v register should be at $2402 ;;;
 	JSR DoubleLDA2007
 	CMP #$03
 	BNE TEST_Fail7
@@ -4193,7 +4233,14 @@ Test_FFFF_Plus_X_Wraparound:
 	BNE TEST_Fail8
 	INC <currentSubTest
 	;;; Test 3 [$FFFF + X Wraparound]: Branching from $FFF4 to $0050 ;;;
-	; Depending on poor implementation, this very-well might crash an emulator.
+Test_FFFF_Plus_X_PrepIRQLoop:
+	LDA TEST_OpenBus_IRQRoutine,X ; USe the same routine as the open bus IRQ. PLA 5 times, and JUMP to the fail condition.
+	STA $600, X
+	INX
+	CPX #8
+	BNE Test_FFFF_Plus_X_PrepIRQLoop
+	; Some emulators might implement this poorly, such that executing beyond address $FFFF crashes or maybe executes all zeroes? So let's set up the IRQ routine in case a BRK runs.
+	
 	LDA #$E6
 	STA <$50
 	LDA #$55
@@ -4209,12 +4256,14 @@ Test_FFFF_Plus_X_Wraparound:
 	CMP #$81
 	BNE TEST_Fail8
 	INC <currentSubTest
+	
+
 	;;; Test 4 [$FFFF + X Wraparound]: Executing from $FFFF to $0000 ;;;
 	LDA #$00
 	STA <$00
 	LDA #$60
 	STA <$01
-	JSR $FFFF ; .word $0600 = ASL <$00; $00 = 60, RTS
+	JSR $FFFF ; .byte $06, $00 = ASL <$00; $01 = 60, RTS
 	
 	;; END OF TEST ;;
 	LDA #1
@@ -8348,6 +8397,49 @@ FAIL_DMC_Conflicts:
 	JMP FAIL_AndDisableAudioChannels
 ;;;;;;;;;;;;;;;;;
 	
+TEST_VblankSync_PreTest:
+	; This runs almost immediately after power on, in order to check if the VBlank Sync routine won't loop infinitely.
+	LDA $2002
+	BPL TEST_VblankSync_PreTest
+	; We are now in vblank, but there's a large window in which this could have occured.
+	; LDA [Read Opcode] [Read Operand] [Read Operand] * [Read $2002]
+	; BPL [Read Opcode] [Read Operand] [Dummy Read, move PC]
+	; A 7 CPU cycle window is a bit large.
+	; At the moment we execute this code, all we know is that the vblank flag was set between 3 and 10 CPU cycles ago.
+	; So the vblank flag will be set between 29770.66 and 29777.66 CPU cycles.
+	; With rendering disabled, every 29781 CPU cycles will "fall back" 1 PPU cycle.
+	; The plan: Read $2002 in exactly 29770 CPU cycles. (0.66 CPU cycles too early.)
+	; Then, stall for 29781 CPU cycles, and read $2002 again.
+	; This will take a minimum of 3 frames to exit, and a maximum of 24 frames.
+	; If it takes longer than 24 frames, it can be assumed the frame timing has the wrong number of CPU/PPU cycles, and could never use my vblank cync routines.
+	LDX #0 ; +2 cycles.
+	JSR Clockslide_29765
+TEST_VblSyncPreTest_Loop:
+	LDA $2002	;+3 [vbl?] +1
+	BMI TEST_VblSyncPreTest_GoodEnding; +2
+	INX; +2
+	CPX #25 ; +2
+	BEQ TEST_VblSyncPreTest_BadEnding ; +2
+	JSR Clockslide_29766
+	JMP TEST_VblSyncPreTest_Loop;+3
+	
+TEST_VblSyncPreTest_GoodEnding:
+	LDA #1
+	STA <result_VblankSync_PreTest
+	RTS
+TEST_VblSyncPreTest_BadEnding:
+	LDA #$80	; I use $80 so my VBL sync routine can start by running `LDA <result_VblankSync_PreTest` `BMI FAIL`
+	STA <result_VblankSync_PreTest
+	RTS
+;;;;;;;
+	
+	
+	
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                ENGINE                   ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	
 	.bank 3
 	.org $EF40
 TEST_DMC_Conflicts_AnswerKey:
@@ -8368,10 +8460,6 @@ TEST_DMC_ConflictsSample:
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 	.byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
 	.byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;                ENGINE                   ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Just a ton of helper functions letting me save some bytes in the tests, and also key functions for loading and navigating the main menu.
 	.org $F000
@@ -10334,7 +10422,43 @@ Clockslide_1728:
 	RTS
 ;;;;;;;
 
+Clockslide_29766:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_16	;166
+	JSR Clockslide_600	;766
+	JSR Clockslide_9000	;9766
+	JSR Clockslide_20000;29766
+	RTS
+;;;;;;;
 
+Clockslide_29765:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_15	;165
+	JSR Clockslide_600	;765
+	JSR Clockslide_9000	;9765
+	JSR Clockslide_20000;29765
+	RTS
+;;;;;;;
+
+Clockslide_3395:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50	;150
+	JSR Clockslide_45	;194
+	JSR Clockslide_200	;394
+	JSR Clockslide_3000	;3394
+	RTS
+;;;;;;;
+
+Clockslide_3380:
+	JSR Clockslide_100Minus12
+	JSR Clockslide_50   ;150
+	JSR Clockslide_30   ;180
+	JSR Clockslide_200	;380
+	JSR Clockslide_3000	;3380
+	RTS
+;;;;;;;
 
 Clockslide36_Plus_A:;+6
 	STA <$00	; +3
@@ -10425,73 +10549,76 @@ DMASync40_Loop:
 	RTS 
 	; so we have 50 cycles to go.
 		
-DMASyncButSlightlyLessReliable:
+DMASyncWithoutOpenBus:
 	; This fuction *should* exit with exactly 406 CPU cycles until the DMA occurs.
 	; It's a very slightly modified version of the DMA sync routine made by blargg in 2005.
 	; It doesn't rely on reading open bus, rather is just simply relies on perfectly timed DMAs, and the 3 or 4 cpu cycle delay after writing to $4015.
 	LDX #0
-	LDA #$80  ; slowest speed.
-	STA $4010 ; Enable DMC IRQ
-	LDA #$0
-	STA $4013 ; Length = 0 (+1)
-	STA $4015 ; Disable DMC
-	LDA #$10
-	STA $4015 ; Enable DMC (clear the DMC buffer)
+    LDA #$80	; Sloest Speed
+    STA $4010	; Also enable the DMC IRQ
+    LDA #0
+    STA $4013	; Length = 0 (+1)
+    LDA $4015	; Disable DMC
+      
+    LDA #$10
+    STA $4015 ; Enable DMC (clear the DMC buffer)
 	NOP
 	STA $4015 ; Enable DMC a second time.
-sync_dmc_loop:
-	BIT $4015	; This only exits once bit 4 is cleared.
-	BNE sync_dmc_loop ; wait for DMC Interrupt
+      
+    ; Coarse synchronize
+dma_sync_loop1:
+    BIT $4015	; This only exits once bit 4 is cleared.
+    BNE dma_sync_loop1
+    NOP      
+    ; Fine synchronize. 3421+4 clocks per iter
+    NOP               ; 2
+    NOP               ; 2
+    LDA #226          ; 3391 delay
+    BNE dma_sync_first; 3
+dma_sync_wait:
+    LDA #226          ; 3406 delay
+	; 15 extra CPU cycles.
+	INX
+	BEQ sync_dmc_fail
+	CMP <$00
 	NOP
 	NOP
 	NOP
-	LDA #$E2
-	BNE sync_dmc_first ; branch always to sync_dmc_first
-sync_dmc_wait:
-	LDA #$E3
-sync_dmc_first:	; Okay, this loops infinitely on virtual console. Ahhhhhhhhhhhhh!
 	NOP
-	NOP	
-	NOP
-	NOP
-	SEC
-	SBC #$01
-	BNE sync_dmc_first
-	LDA #$10
-	STA $4015
-	NOP
-	BIT $4015
-	BNE sync_dmc_wait
+dma_sync_first:
+    NOP
+    NOP
+    NOP
+    NOP
+    SEC
+    SBC #1
+    BNE dma_sync_first
+                     ; 4 DMC wait-states
+    LDA #$10         ; 2
+    STA $4015        ; 4
+    NOP              ; 2
+    BIT $4015        ; 4
+    BNE dma_sync_wait; 3
+    ; The DMA is now synced!
 
-	; The DMA is now synced!
-	LDA <Copy_A ; waste 3 cycles
-	LDA <Copy_A ; waste 3 cycles
+	LDA #$0F
+	STA $4010
+    JSR Clockslide_3380
 	NOP
-	LDX #$A3
-	LDA #$03
-sync_dmc_loop2:
-	DEX
-	BNE sync_dmc_loop2
-	SEC
-	SBC #$01
-	BNE sync_dmc_loop2
-	LDA <Copy_A ; waste 3 cycles
-	NOP			; waste 2 cycles.
 	LDA #$10
-	STA $4015 ; start DMC
-	; The DMC DMA is specifically timed to occur exactly 3 cpu cycles after this write.
-	; Blargg's original DMC DMA sync routine ran this STA 1 cycle too late, which exposed an interesting error in a lot of emulators.
-	; I'll be testing for this error in my DMC DMA test.
+    STA $4015
 	LDA #$10
-	STA $4015 ; start DMC again
-			  ; 3404 CPU cycles until the DMA.
-			  ; the objective is to RTS with 412 cycles, so post RTS is 406 cycles remaining.
-	JSR Clockslide_3000
+    STA $4015
 	NOP
 	NOP
+	NOP
+	NOP
+	
 	RTS				  ; 412 -> 406
 	; the next DMA is at (432) cycles, so we have 406 cycles to go.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+sync_dmc_fail:
+	RTS	; The DMA timing will be way off on this test, but it was unable to sync anyway, so... Better than infinite looping?
 
 	.org $FF00
 Clockslide:
@@ -10587,7 +10714,7 @@ DMASync: ; Line up the CPU and the DMA. The DMA occurs 406 CPU cycles after the 
 	BEQ TEST_DoesTheDMAUpdateOpenBus ; if we haven't ran this yet, run this test, then return back here.
 	CMP #01
 	BEQ DMASync_TheGoodOne
-	JMP DMASyncButSlightlyLessReliable
+	JMP DMASyncWithoutOpenBus
 DMASync_TheGoodOne:
 	; This fuction very relaibly exits with exactly 406 CPU cycles until the DMA occurs.
 	; However, it relies on open bus behavior, with the consequence of an infinite loop if not correctly emulated.
@@ -10670,6 +10797,12 @@ VblSync_skip4:
 	JMP VblSync_Loop2 ;+3 cycles
 ;;;;;;;;;;;;;;;;;;;;;
 
+	.org $FFBE
+VblSync_ABORT:	; This emulator failed to pre-test, implying that this will loop infinitely, so instead of doing that, just don't bother.
+	PLA
+	RTS
+;;;;;;;
+
 	.org $FFC0
 	; 17 00s. This will be the DPCM "audio sample" played during the CMD DMA Sync loop. It should just be silence.
 	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
@@ -10685,6 +10818,10 @@ VblSync_Loop2:
 ;;;;;;;
 
 VblSync_Plus_A: ; In this context, A is a PPU cycle.
+	PHA
+	LDA <result_VblankSync_PreTest		; Check if this sync routine will loop infinitely.
+	BMI VblSync_ABORT	; If it will, just RTS without syncing. It was going to fail the test anyway with frame timing that incorrect.
+	PLA
 	JSR VblSync	; Sync to VBlank
 VblSync_Plus_A_Loop:   
 	JSR Clockslide_29750 ; wait 29774 cycles
@@ -10694,10 +10831,6 @@ VblSync_Plus_A_Loop:
 	BCS VblSync_Plus_A_Loop ; + 3 if looping, 2 otherwise. (29781 CPU cycles if looping. Each frame is 29780.67 CPU cycles long, so this advances 1 PPU cycle)
 	JMP VblSync_Plus_A_End	; I ran out of space, so I moved it up there.
 	
-	.byte $EA, $EA, $EA, $EA, $EA, $EA
-
-
-
 	;.org $FFF5
 TEST_FFFF_Branch_Wraparound:
 	; This is part of test 3 of Test_FFFF_Plus_X_Wraparound
