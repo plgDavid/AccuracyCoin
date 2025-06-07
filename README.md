@@ -290,6 +290,8 @@ For more information, I recommend reading the fully commented assembly code for 
   3: The OAM DMA should not be able to read from the APU registers if $40 is written to $4016, and the CPU Address Bus is not in the range of $4000 to $401F.  
   4: Something went wrong during the open bus execution. Controller port 2 was possibly clocked too many times.  
   5: The OAM DMA should be able to read from the APU registers (and mirrors of them) if $40 is written to $4016, and the CPU Address Bus is in the range of $4000 to $401F.  
+  6: Bus conflicts with the APU registers were not properly emulated.
+  7: Despite the controller registers not being visible in OAM, the controllers should still be clocked.
 
 ### DMC DMA Bus Conflicts
   1: The DMA did not occur on the correct CPU cycle.  
