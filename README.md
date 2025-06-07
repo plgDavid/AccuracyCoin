@@ -260,7 +260,8 @@ For more information, I recommend reading the fully commented assembly code for 
   L: Writing to $4015 when the DMC timer has less than 3 cycles until clocked will not trigger a DMC DMA until after the 3 or 4 CPU cycle delay of writing to $4015.  
 
 ### DMA + Open Bus
-  1: The DMC DMA was either on the wrong cycle, or it did not update the data bus.  
+  1: LDA $4000 should not read back $00 if a DMA did not occur.  
+  2: The DMC DMA was either on the wrong cycle, or it did not update the data bus.  
 
 ### DMA + $2007 Read
   1: The PPU Read Buffer is not working.

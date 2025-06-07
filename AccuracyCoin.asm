@@ -84,6 +84,7 @@ PostAllTestTally = $37
 PostAllPassTally = $38
 PrintDecimalTensCheck = $39
 result_VblankSync_PreTest = $3A
+DebugMode = $3B
 
 
 PostDMACyclesUntilTestInstruction = 14
@@ -4148,6 +4149,13 @@ TEST_MAGIC_Continue3:
 ;;;;;;;
 
 TEST_DMA_Plus_OpenBus:
+	;;; Test 1 [DMA + Open Bus]: Check if reading from $4000 returns $40, and not zero. ;;;
+	LDA $4000
+	CMP #$40
+	BNE FAIL_DMA_Plus_OpenBus
+	INC <currentSubTest
+
+	;;; Test 2 [DMA + Open Bus]: If the DMA occurs just before the Open Bus read, it will update the databus to $00 ;;;
 	JSR DMASync_50CyclesRemaining	; sync DMA
 	JSR Clockslide_47
 	LDA $4000 ; <------- [Opcode] [Operand1] [Operand2] [*DMA*] [Read]
@@ -6110,28 +6118,28 @@ TEST_APURegActivation:
 TEST_APURegActivation_Test5Loop:
 	LDA $2004
 	STA $2004 ; increment OAM Address.
-	STA $200,X
+	STA $500,X
 	INX
 	BNE TEST_APURegActivation_Test5Loop
 	; Instead of making a 256 byte large look up table, I'm going to check each row individually. The result should match that table printed out above in the Test 4 description.
 	; X already equals zero.
 TEST_APURegActivation_Eval_0:		;
-	LDA $200,X						; Read the value copied from OAM
+	LDA $500,X						; Read the value copied from OAM
 	CMP #$40						; This row should be all $40's
 	BNE FAIL_APURegActivation		; If it's not $40, you fail
 	INX								; If it IS $40, check the next one.
 	CPX #$15						; Loop this through address $214
 	BNE TEST_APURegActivation_Eval_0;
-	LDA $200,X						; Read the value copied from OAM at $215
+	LDA $500,X						; Read the value copied from OAM at $215
 	CMP #$44						; This should be 44
 	BNE FAIL_APURegActivation		; If it's not $44, you fail
 	INX								; Increment X for the next one.
-	LDA $200,X						; Read the value copied from OAM at $216
+	LDA $500,X						; Read the value copied from OAM at $216
 	CMP #$41						; This should be 41
 	BNE FAIL_APURegActivation		; If it's not $41, you fail
 	INX								; Increment X for the next one.
 TEST_APURegActivation_Eval_1:		;
-	LDA $200,X						; Read the value copied from OAM
+	LDA $500,X						; Read the value copied from OAM
 	CMP #$40						; This row should be all $40's
 	BNE FAIL_APURegActivation		; If it's not $40, you fail
 	INX								; If it IS $40, check the next one.
@@ -6142,17 +6150,17 @@ TEST_APURegActivation_Eval_1:		;
 TEST_APURegActivation_Eval_2:
 	CPY #2
 	BPL TEST_APURegActivation_Skip0401
-	LDA $200,X						; Read the value copied from OAM at $2_5
+	LDA $500,X						; Read the value copied from OAM at $2_5
 	CMP #$04						; This should be 04
 	BNE FAIL_APURegActivation		; If it's not $04, you fail
 	INX								; Increment X for the next one.
-	LDA $200,X						; Read the value copied from OAM at $2_6
+	LDA $500,X						; Read the value copied from OAM at $2_6
 	CMP #$01						; This should be 01
 	BNE FAIL_APURegActivation		; If it's not $01, you fail
 	INX								; Increment X for the next one.	
 	LDY #02							; It probably should have been INY's for neat-ness, but this saves 2 CPU cycles.
 TEST_APURegActivation_Skip0401:
-	LDA $200,X						; Read the value copied from OAM
+	LDA $500,X						; Read the value copied from OAM
 	CMP #$00						; This should be 00
 	BNE FAIL_APURegActivation		; If it's not $00, you fail
 	INY								; Increment Y for the next one.
@@ -6250,7 +6258,7 @@ TEST_APURegActivation_Prep6Loop:
 TEST_APURegActivation_Test6Loop:
 	LDA $2004
 	STA $2004 ; increment OAM Address.
-	STA $200,X
+	STA $500,X
 	INX
 	BNE TEST_APURegActivation_Test6Loop	
 	
@@ -6258,21 +6266,21 @@ TEST_APURegActivation_Test6Loop:
 TEST_APURegActivation_Eval_3:
 	CPY #2
 	BPL TEST_APURegActivation_Skip0601
-	LDA $200,X						; Read the value copied from OAM at $2_5
+	LDA $500,X						; Read the value copied from OAM at $2_5
 	CMP #$24						; This should be 24
 	BNE FAIL_APURegActivation		; If it's not $24, you fail
 	INX								; Increment X for the next one.
-	LDA $200,X						; Read the value copied from OAM at $2_6
+	LDA $500,X						; Read the value copied from OAM at $2_6
 	CMP #$E3						; This should be E3
 	BNE FAIL_APURegActivation2		; If it's not $E3, you fail
 	INX								; Increment X for the next one.	
-	LDA $200,X						; Read the value copied from OAM at $2_7
+	LDA $500,X						; Read the value copied from OAM at $2_7
 	CMP #$FF						; This should be FF
 	BNE FAIL_APURegActivation2		; If it's not $FF, you fail
 	INX								; Increment X for the next one.	
 	LDY #03							; It probably should have been INY's for neat-ness, but this saves 2 CPU cycles.
 TEST_APURegActivation_Skip0601:
-	LDA $200,X						; Read the value copied from OAM
+	LDA $500,X						; Read the value copied from OAM
 	PHA
 	TXA
 	AND #3
@@ -6298,14 +6306,14 @@ TEST_APURegActivation_YSkip2:
 TEST_APURegActivation_Eval_4:
 	CPY #2
 	BPL TEST_APURegActivation_Skip0602
-	LDA $200,X						; Read the value copied from OAM at $2_5
+	LDA $500,X						; Read the value copied from OAM at $2_5
 	CMP #$04						; This should be 04
 	BNE FAIL_APURegActivation2		; If it's not $04, you fail
 	INX								; Increment X for the next one.
-	LDA $200,X						; Read the value copied from OAM at $2_6
+	LDA $500,X						; Read the value copied from OAM at $2_6
 	BNE FAIL_APURegActivation2		; If it's not $00, you fail
 	INX								; Increment X for the next one.	
-	LDA $200,X						; Read the value copied from OAM at $2_7
+	LDA $500,X						; Read the value copied from OAM at $2_7
 	BNE FAIL_APURegActivation2		; If it's not $00, you fail
 	INX								; Increment X for the next one.	
 	LDY #03							; It probably should have been INY's for neat-ness, but this saves 2 CPU cycles.
@@ -8876,8 +8884,9 @@ ClearPage5Loop:
 	STA $700,X ; it also clears page 7. (The NMI vector points to $700, but the NMI routine is set up again at the end of any tests, so don't worry)
 	INX
 	BNE ClearPage5Loop
-	; let's also clear $50 - $6F on the zero page.
+	; let's also clear $50 - $6F on the zero page. also $20 to $2F
 ClearPage5ZPLoop:
+	STA <$20,X
 	STA <$50,X
 	STA <$60,X
 	INX
@@ -9217,7 +9226,7 @@ ReadPalLoop:
 ;;;;;;;
 
 DefaultPalette:	; The default palette for the main menu.
-	.byte $2D,$30,$30,$30,$0F,$21,$21,$21,$0F,$26,$26,$26,$0F,$2A,$2A,$2A
+	.byte $2D,$30,$30,$30,$0F,$21,$21,$21,$0F,$26,$26,$26,$0F,$2D,$2D,$2D
 	.byte $2D,$30,$30,$30,$0F,$30,$30,$30,$0F,$30,$30,$30,$0F,$30,$30,$30	
 SetUpDefaultPalette: ; This function overwrites palette RAM with the values in the above table.
 	LDA #$3F
@@ -9642,7 +9651,7 @@ HighlightPageNumber:	; Swaps the characters on the nametable from the unhighligh
 	LDY #$00
 HighlightPageNumberLoop:
 	LDA $2007
-	STA $500,Y ; this will get cleared before any tests run, so I don't feel bad for using these bytes here,
+	STA $7F0,Y ; this will get cleared before any tests run, so I don't feel bad for using these bytes here,
 	INY
 	CPY #$0C
 	BNE HighlightPageNumberLoop
@@ -9650,7 +9659,7 @@ HighlightPageNumberLoop:
 	.byte $20, $AA
 	LDY #$00
 HighlightPageTextLoop:
-	LDA $500,Y ; this will get cleared before any tests run, so I don't feel bad for using these bytes here,
+	LDA $7F0,Y ; this will get cleared before any tests run, so I don't feel bad for using these bytes here,
 	EOR #$80
 	STA $2007
 	INY
@@ -9805,6 +9814,111 @@ NMI_Routine:
 	; This is the NMI routine for the main menu.
 	JSR ReadController1
 	JSR MaskDpadConflicts
+	LDA <controller_New
+	AND #$20
+	BNE NMI_DoDebugStuff
+	JMP NMI_NotPressingSelect
+NMI_DoDebugStuff:
+	; Enter or exit debug mode.
+	LDA <DebugMode
+	BEQ NMI_EnterDebugMode
+	; exiting debug mode.
+	LDA #0
+	STA <DebugMode
+	LDA <PPUCTRL_COPY
+	AND #$EF
+	STA <PPUCTRL_COPY	; the tiles will use pattern table 2.
+	STA $2000
+	JSR SetPPUADDRFromWord
+	.byte $20, $00
+	LDA <PPUMASK_COPY
+	AND #$FE
+	STA <PPUMASK_COPY
+	STA $2001
+	JMP NMI_NotPressingSelect
+NMI_EnterDebugMode:
+	LDA #1
+	STA <DebugMode
+	LDA <PPUCTRL_COPY
+	ORA #$10
+	STA <PPUCTRL_COPY ; the tiles will use pattern table 1.
+	STA $2000
+	JSR DisableRendering
+	JSR DisableNMI
+	JSR ClearNametable2
+	JSR SetPPUADDRFromWord
+	.byte $25, $00
+	LDX #0
+NMI_EnterDebugModeLoop:
+	LDA $500,X
+	STA $2007
+	INX
+	BNE NMI_EnterDebugModeLoop
+	JSR SetPPUADDRFromWord
+	.byte $24, $A0
+	LDX #0
+NMI_EnterDebugModeLoop2:
+	LDA <$50,X
+	STA $2007
+	INX
+	CPX #$20
+	BNE NMI_EnterDebugModeLoop2
+	BNE NMI_EnterDebugModeLoop
+	JSR SetPPUADDRFromWord
+	.byte $24, $80
+	LDX #0
+NMI_EnterDebugModeLoop3:
+	LDA <$20,X
+	STA $2007
+	INX
+	CPX #$10
+	BNE NMI_EnterDebugModeLoop3
+	JSR SetPPUADDRFromWord
+	.byte $27, $C0
+	; set up attribute bytes.
+	LDX #0
+	LDA #$FF
+NMI_EnterDebugModeLoop4:
+	STA $2007
+	INX
+	CPX #$8
+	BNE NMI_EnterDebugModeLoop4
+	; next 8, write #F0
+	LDA #$F0
+NMI_EnterDebugModeLoop5:
+	STA $2007
+	INX
+	CPX #$10
+	BNE NMI_EnterDebugModeLoop5
+	; next 16, write #00
+	LDA #0
+NMI_EnterDebugModeLoop6:
+	STA $2007
+	INX
+	CPX #$20
+	BNE NMI_EnterDebugModeLoop6
+	; next 16, write #FF again
+	LDA #$FF
+NMI_EnterDebugModeLoop7:
+	STA $2007
+	INX
+	CPX #$40
+	BNE NMI_EnterDebugModeLoop7
+	JSR WaitForVBlank
+	LDA <PPUMASK_COPY
+	ORA #$0A
+	STA <PPUMASK_COPY
+	STA $2001
+	JSR EnableNMI
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
+	
+	
+NMI_NotPressingSelect:
+	LDA <DebugMode
+	BEQ NMI_Continue
+	RTI	; skip the JSR ResetScroll when in debug mode.
+NMI_Continue:
 	LDA <menuCursorYPos
 	LDX <menuCursorYPos
 	BMI NMI_Menu_CursorAtTop
@@ -9980,6 +10094,21 @@ DNST_DontAdjustV:
 	JSR PrintByteDecimal_MinDigits
 	LDA #0
 	STA <HighlightTextPrinted
+	RTS
+;;;;;;;
+	
+ClearNametable2:
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
+	LDA #0
+	TAY
+	LDX #4
+TEST_RMW2007_ClearNametable2Loop:
+	STA $2007
+	DEY
+	BNE TEST_RMW2007_ClearNametable2Loop
+	DEX
+	BNE TEST_RMW2007_ClearNametable2Loop
 	RTS
 ;;;;;;;
 	
