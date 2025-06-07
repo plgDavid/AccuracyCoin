@@ -7455,7 +7455,7 @@ TEST_RMW2007_ClearNametableLoop:
 	JSR SetPPUADDRFromWord
 	.byte $3F, $0E
 	LDA $2007 ; Palette RAM doesn't use the PPU Read buffer.
-	CMP #$2B
+	CMP #$2E
 	BNE FAIL_RMW2007
 	INC <currentSubTest
 		
