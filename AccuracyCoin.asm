@@ -5464,6 +5464,7 @@ TEST_MisalignedOAM_P4_1_Loop:
 	INC <currentSubTest	
 
 	;;; Test 5 [Misaligned OAM Behavior]: Misaligned OAM "+4* behavior" Offset by 1, Second OAM Full, so OAMAddr +=5 (* Only +1 with the X Position) ;;;
+	; If Secondary OAM is full, instead of incrementing the OAM Address by 1 and bitwise ANDing with $FC, you should instead only increment the OAM address by 5.
 	; OAM will be offset by 1.
 	JSR ClearPage2
 	LDX #0
@@ -6079,7 +6080,7 @@ TEST_APURegActivation:
 	.byte $14, $FF
 	JSR SetPPUADDRFromWord
 	.byte $24, $00
-	LDA $2007 ; Pre the buffer with the value of $14 written to PPU $2400
+	LDA $2007 ; Prep the buffer with the value of $14 written to PPU $2400
 	JSR ResetScroll
 	; Step 5: Put $8D in the PPU data bus.
 	LDA #$8D
@@ -6162,7 +6163,172 @@ TEST_APURegActivation_SkipResetY:
 	INX								; Increment X for the next one.	
 	BNE TEST_APURegActivation_Eval_2
 	; Bravo!
+	INC <currentSubTest
+	BNE TEST_APURegActivation_Continue
+
+FAIL_APURegActivation:
+	LDA #$40
+	STA $4017
+	LDA #0
+	STA $4015
+	JMP TEST_Fail
+;;;;;;;;;;;;;;;;;
+		
+TEST_APURegActivation_Continue:
+	;;; Test 6 [APU Register Activation]: If the APU registers are active, there will be bus conflicts if the OAM DMA is reading from outside of open bus. ;;;
+	; The setup here is incredibly similar, exept the OAM DMA will occur on page 2 instead, after clearing page 2 to all FFs.
+	; Also we're going to write a value of $00 to $2FF to populate the data bus with $00 before the OAM ends.
+	;
+	; Here's how OAM should end up after this test:
+	;
+	;      00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F
+	;    ┌─────────────────────────────────────────────────┐
+	; 00 │ FF FF E3 FF FF FF E3 FF FF FF E3 FF FF FF E3 FF │ ; The value of $FF is because we cleared page 2 with a bunch of FFs. (and the $E3 is the attribute bytes)
+	; 10 │ FF FF E3 FF FF 24 E3 FF FF FF E3 FF FF FF E3 FF │ ; The value of $24 is the triangle channel from reading address $4015, + bit 5 is set from the byte on page 2.
+	; 20 │ FF FF E3 FF FF FF E3 FF FF FF E3 FF FF FF E3 FF │ ; Amusingly, it does not appear to have read the controllers, despite the reads from APU_STATUS.
+	; 30 │ FF FF E3 FF FF 24 E3 FF FF FF E3 FF FF FF E3 FF │
+	; 40 │ FF FF E3 FF FF FF E3 FF FF FF E3 FF FF FF E3 FF │
+	; 50 │ FF FF E3 FF FF 24 E3 FF FF FF E3 FF FF FF E3 FF │
+	; 60 │ FF FF E3 FF FF FF E3 FF FF FF E3 FF FF FF E3 FF │
+	; 70 │ FF FF E3 FF FF 24 E3 FF FF FF E3 FF FF FF E3 FF │
+	; 80 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │ ; I made the second half of page 2 all zeroes.
+	; 90 │ 00 00 00 00 00 04 00 00 00 00 00 00 00 00 00 00 │
+	; A0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; B0 │ 00 00 00 00 00 04 00 00 00 00 00 00 00 00 00 00 │
+	; C0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; D0 │ 00 00 00 00 00 04 00 00 00 00 00 00 00 00 00 00 │
+	; E0 │ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 │
+	; F0 │ 00 00 00 00 00 04 00 00 00 00 00 00 00 00 00 00 │ 
+	;    └─────────────────────────────────────────────────┘
+	;
+	; Most amusingly, it looks like $4015 is read, but $4016 and $4017 aren't visible in this chart. (But don't let that fool you, as the controllers are still getting clocked)
 	
+	JSR ClearPage2
+	LDX #$80
+	LDA #0
+TEST_APURegActivation_Prep6Loop:
+	STA $200, X
+	INX 
+	BNE TEST_APURegActivation_Prep6Loop
+	LDA #$40
+	STA $4017
+	
+	; Run the same setup as the above test.
+	LDA #4
+	STA $4015	; enable the triangle channel
+	LDA #$F0
+	STA $400B
+	LDA #$FF
+	STA $4008
+	; strobe controllers.
+	LDA #1
+	STA $4016
+	LSR A
+	STA $4016
+	; Put $14 in the PPU read buffer.
+	JSR WaitForVBlank
+	JSR DisableRendering
+	JSR WriteToPPUADDRWithByte
+	.byte $24, $00
+	.byte $14, $FF
+	JSR SetPPUADDRFromWord
+	.byte $24, $00
+	LDA $2007 ; Prep the buffer with the value of $14 written to PPU $2400
+	JSR ResetScroll
+	; Put $8D in the PPU data bus.
+	LDA #$8D
+	STA $2002	
+	; Schedule a DMA
+	LDA #$02
+	JSR DMASyncWith40
+	; We have 50 CPU cycles until the DMA occurs.
+	; JSR takes 6 cycles, we want the DMA to occur 3 cycles after that. We need to stall for 41 CPU cycles
+	JSR Clockslide_41	; This takes 41 CPU cycles
+	JSR $3FFE	; Jump to $3FFE, as explained above.
+	;;;;;; A real big loop to read compare the values in OAM with the desired results.
+	LDX #0
+TEST_APURegActivation_Test6Loop:
+	LDA $2004
+	STA $2004 ; increment OAM Address.
+	STA $200,X
+	INX
+	BNE TEST_APURegActivation_Test6Loop	
+	
+	LDY #$0B	; Y loops back to $00 in $15 bytes
+TEST_APURegActivation_Eval_3:
+	CPY #2
+	BPL TEST_APURegActivation_Skip0601
+	LDA $200,X						; Read the value copied from OAM at $2_5
+	CMP #$24						; This should be 24
+	BNE FAIL_APURegActivation		; If it's not $24, you fail
+	INX								; Increment X for the next one.
+	LDA $200,X						; Read the value copied from OAM at $2_6
+	CMP #$E3						; This should be E3
+	BNE FAIL_APURegActivation2		; If it's not $E3, you fail
+	INX								; Increment X for the next one.	
+	LDA $200,X						; Read the value copied from OAM at $2_7
+	CMP #$FF						; This should be FF
+	BNE FAIL_APURegActivation2		; If it's not $FF, you fail
+	INX								; Increment X for the next one.	
+	LDY #03							; It probably should have been INY's for neat-ness, but this saves 2 CPU cycles.
+TEST_APURegActivation_Skip0601:
+	LDA $200,X						; Read the value copied from OAM
+	PHA
+	TXA
+	AND #3
+	CMP #02
+	BNE TEST_APURegActivation_CheckForFFInsteadOfE7
+	PLA
+	CMP #$E3
+	BNE FAIL_APURegActivation2
+	BEQ TEST_APURegActivation_EvalCont
+TEST_APURegActivation_CheckForFFInsteadOfE7:
+	PLA
+	CMP #$FF
+	BNE FAIL_APURegActivation2		; If it's not $FF, you fail
+TEST_APURegActivation_EvalCont:
+	INY								; Increment Y for the next one.
+	CPY #$20
+	BNE TEST_APURegActivation_YSkip2	; if Y=20, reset to 0, so we can check for the "$04 $01"
+	LDY #0
+TEST_APURegActivation_YSkip2:
+	INX								; Increment X for the next one.	
+	CPX #$80
+	BNE TEST_APURegActivation_Eval_3
+TEST_APURegActivation_Eval_4:
+	CPY #2
+	BPL TEST_APURegActivation_Skip0602
+	LDA $200,X						; Read the value copied from OAM at $2_5
+	CMP #$04						; This should be 04
+	BNE FAIL_APURegActivation2		; If it's not $04, you fail
+	INX								; Increment X for the next one.
+	LDA $200,X						; Read the value copied from OAM at $2_6
+	BNE FAIL_APURegActivation2		; If it's not $00, you fail
+	INX								; Increment X for the next one.	
+	LDA $200,X						; Read the value copied from OAM at $2_7
+	BNE FAIL_APURegActivation2		; If it's not $00, you fail
+	INX								; Increment X for the next one.	
+	LDY #03							; It probably should have been INY's for neat-ness, but this saves 2 CPU cycles.
+TEST_APURegActivation_Skip0602:
+	LDA $200,X						; Read the value copied from OAM
+	BNE FAIL_APURegActivation2		; If it's not $00, you fail
+	INY								; Increment Y for the next one.
+	CPY #$20
+	BNE TEST_APURegActivation_YSkip3	; if Y=20, reset to 0, so we can check for the "$04 $01"
+	LDY #0
+TEST_APURegActivation_YSkip3:
+	INX								; Increment X for the next one.	
+	BNE TEST_APURegActivation_Eval_4
+	INC <currentSubTest
+	
+	;;; Test 6 [APU Register Activation]: The controller ports might not have been visible by the OAM DMA, but did the controller ports get clocked? ;;;
+
+	LDA $4016
+	LDA $4016	; it is assumed the B button is not pressed during the test.
+	LSR A
+	BCC FAIL_APURegActivation2	; Bingo! Look at that. The controller ports *were* clocked, but did not appear in OAM!
+	; Most amusing.
+		
 	;; END OF TEST ;;
 	LDA #0
 	STA $4015
@@ -6170,7 +6336,7 @@ TEST_APURegActivation_SkipResetY:
 	RTS
 ;;;;;;;
 
-FAIL_APURegActivation:
+FAIL_APURegActivation2:
 FAIL_DMA_Timing:
 	LDA #$40
 	STA $4017
