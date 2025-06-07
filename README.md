@@ -3,6 +3,24 @@ A large collection of NES accuracy tests on a single NROM cartridge.
 
 This ROM was designed for the RP2A03G CPU, and the RP2C02G PPU. Some tests might fail on hardware with a different revision.
 
+This ROM currently has 107 tests, each composed of several smaller tests in order to print error codes narrowing down the specific issues your NES emulator might have.
+
+Here's an example of the menu in this ROM, shown on an emulator failing a few tests, passing others, and a few tests on screen haven't been ran yet. (The cursor is currently next to the "RAM Mirroring" test.)
+
+![AccuracyCoin_Page1](https://github.com/user-attachments/assets/ad0cb426-cd84-4784-8b7c-f7dcfecc882a)
+
+# Navigating the menus
+Use the DPad to move the cursor up or down.  
+If the cursor is at the top of the page (highlighting the current page index), pressing left and right will scroll to a new page of tests.  
+If the cursor is at the top of the page (highlighting the current page index), pressing A will run all tests on the page.  
+If the cursor is at the top of the page (highlighting the current page index), pressing Start will run all tests on the ROM, and then draw a table showing the results of every test.
+
+Examples:
+
+![Result_Table](https://github.com/user-attachments/assets/523aca93-0f43-4253-addc-9d23ae776b63)
+
+The top 3 tests on page 9 have two different acceptable results depending on the CPU revision, so the light blue number will indicate which behavior was detected.
+
 # Error Codes
 For more information, I recommend reading the fully commented assembly code for the test.
 
@@ -87,11 +105,12 @@ For more information, I recommend reading the fully commented assembly code for 
   1: The target address of the instruction was not the correct value after the test. (Not applicable to the "Immediate" addressing mode.)  
   2: The A register was not the correct value after the test.  
   3: The X register was not the correct value after the test.  
-  4: The Y register was not the correct Value after the test.  
+  4: The Y register was not the correct value after the test.  
   5: The CPU Status flags were not correct after the test.  
+  6: The Stack pointer was not the correct value after the test. (Only applicable to LAE)  
 
-### Unofficial Instructions: SHA, SHS, SHX, SHY
-  F: The high byte corruption did not match either known behavior. (Only applicable to SHA and SHS. Corruption with SHX and SHY is consistent across revisions.)  
+### Unofficial Instructions: SHA, SHX, SHY
+  F: The high byte corruption did not match either known behavior. (Only applicable to SHA. Corruption with SHX and SHY is consistent across revisions.)  
   0: This instruction had the wrong number of operand bytes.  
   1: The target address of the instruction was not the correct value after the test.  
   2: The A register was not the correct value after the test.  
@@ -103,6 +122,22 @@ For more information, I recommend reading the fully commented assembly code for 
   8: If the RDY line goes low 2 cycles before the write cycle, The X register was not the correct value after the test.  
   9: If the RDY line goes low 2 cycles before the write cycle, The Y register was not the correct Value after the test.  
   A: If the RDY line goes low 2 cycles before the write cycle, The CPU Status flags were not correct after the test.  
+
+ ### Unofficial Instructions: SHS
+  F: The high byte corruption did not match either known behavior.
+  0: This instruction had the wrong number of operand bytes.  
+  1: The target address of the instruction was not the correct value after the test.  
+  2: The A register was not the correct value after the test.  
+  3: The X register was not the correct value after the test.  
+  4: The Y register was not the correct Value after the test.  
+  5: The CPU Status flags were not correct after the test.  
+  6: The Stack pointer was not the correct value after the test.  
+  7: If the RDY line goes low 2 cycles before the write cycle, The target address of the instruction was not the correct value after the test.  
+  8: If the RDY line goes low 2 cycles before the write cycle, The A register was not the correct value after the test.  
+  9: If the RDY line goes low 2 cycles before the write cycle, The X register was not the correct value after the test.  
+  A: If the RDY line goes low 2 cycles before the write cycle, The Y register was not the correct Value after the test.  
+  B: If the RDY line goes low 2 cycles before the write cycle, The CPU Status flags were not correct after the test.  
+  C: If the RDY line goes low 2 cycles before the write cycle, The Stack pointer was not the correct value after the test.  
 
 ### Interrupt flag latency
   1: An IRQ should occur when a DMC sample ends, the DMC IRQ is enabled, and the CPU's I Flag is clear.  
