@@ -124,7 +124,7 @@ For more information, I recommend reading the fully commented assembly code for 
   A: If the RDY line goes low 2 cycles before the write cycle, The CPU Status flags were not correct after the test.  
 
  ### Unofficial Instructions: SHS
-  F: The high byte corruption did not match either known behavior.
+  F: The high byte corruption did not match either known behavior.  
   0: This instruction had the wrong number of operand bytes.  
   1: The target address of the instruction was not the correct value after the test.  
   2: The A register was not the correct value after the test.  
