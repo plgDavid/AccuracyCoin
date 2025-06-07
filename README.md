@@ -390,6 +390,10 @@ For more information, I recommend reading the fully commented assembly code for 
   3: Reads from the attribute bytes should be missing bits 2 through 5.  
   4: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering enabled) should always read $FF.  
   5: Reads from $2004 during PPU cycle 1 to 64 of a visible scanline (with rendering disabled) does a regular read of $2004.  
+  6: Writing to $2004 on a visible scanline should increment the OAM address by 4.  
+  7: Writing to $2004 on a visible scanline shouldn't write to OAM.  
+  8: Reads from $2004 during PPU cycle 65 to 256 of a visible scanline (with rendering enabled) should read from the current OAM address.  
+  9: Reads from $2004 during PPU cycle 256 to 320 of a visible scanline (with rendering enabled) should always read $FF.  
 
 ### RMW $2007 Extra Write
   1: A Read-Modify-Write instruction to address $2007 should perform an extra write where the low byte of the PPU address written is the result of the Read-Modify-Write instruction.  

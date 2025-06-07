@@ -5084,7 +5084,7 @@ TEST_ArbitrarySpriteZeroLoop:
 	;	- That previous sentance was just a verbose way of calculating "yes, this object should be rendered on the next scanline".
 	;	- Now, if Secondary-OAM is not full (in this example it is still empty, so yeah- it's not full) we know this object will be in the next scanline, so add it to Secondary-OAM.
 	;	- In addition to being added to Secondary-OAM, if this is PPU cycle 66 of a scanline, it is assumed that we are processing sprite zero, so raise a flag indicating sprite zero exists on the next scanline.
-	; STEP 2 to 4: Read "S" as the CHR data, attributes, and X position respectively. 
+	; STEP 2 to 4: Read "S" as the CHR data, attributes, and X position respectively. (each of these steps happen 2 ppu cycles after the previous step, since we need to read "S" from OAM again)
 	;	- There's actually some wild stuff going on with the X position, but that's for a different test.
 	;
 	; So to recap, read the Y position, and on the following cycle, see if it's in range. If it is, and this is PPU cycle 66 of a given scanline, raise a flag indicating sprite zero exists on the next scanline.
@@ -5287,6 +5287,7 @@ TEST_MisalignedOAM_Behavior:
 	; Let's talk about what happens when you misalign the PPU OAM Address immediately before sprite evaluation, and how this changes the behavior of sprite evaluation.
 	;;; Test 1 [Misaligned OAM Behavior]: Misaligned OAM can properly draw a sprite and trigger a sprite zero hit (Misaligned OAM "+1 behavior"). ;;;
 	; This is genuinely the exact same test as [Arbitrary Sprite Zero] test 3.
+	; Please see [Arbitrary Sprite Zero] test 3 for an explanation.
 	; If this doesn't work, then it is assumed misaligned OAM is not working at all.
 	JSR PREP_SpriteZeroHit			
 	JSR MisalignedOAM_SpriteZeroTest
@@ -5312,7 +5313,11 @@ TEST_MisalignedOAM_Behavior:
 	; PPUOAMAddress += 4
 	; PPUOAMAddress &= $FC
 	;
-	; This bitwise AND masks away the lower 2 bits, and it's not super common to see emulated. Also if OAM is always aligned, then this bitwise AND seemingly does nothing.
+	; This bitwise AND masks away the lower 2 bits, and it's not super common to see emulated.
+	; If OAM is always aligned, then this bitwise AND seemingly does nothing.
+	; In pretty much every case, the OAM address will always be a multiple of 4 when reading the Y position from OAM. 
+	; Hence, adding 4 to this address when an object's Y position is not in range would take it to another multiple of 4. The bitwise AND makes no affect.
+	;
 	; However, if the OAM address is not a multiple of 4 when this bitwise AND occurs, it will re-align the PPUOAMAddress with a multiple of 4.
 	; Let's study a series of bytes in OAM and how this works.
 	; I'll put square brackets around the first object to be evaluated, and curly braces around the second. 
@@ -5925,6 +5930,26 @@ TEST_Address2004_Behavior_loop:			; Set up page 2 so every value is essentially 
 	CMP #$FF
 	BEQ FAIL_Address2004_Behavior1	; Since it's inconsistent between CPU/PPU clock alignments, (and probably different on different consolre revisions) we'll simply just check that it isn't FF.
 
+	;;; Test 9 [Address $2004 behavior]: Reads from $2004 during PPU cycle 256 to 320 of a visible scanline (with rendering enabled) reads $FF again. ;;;
+	JSR WaitForVBlank
+	JSR DisableRendering
+
+	LDA #0
+	JSR VblSync_Plus_A
+	; Sync to dot 0 of vblank
+	LDA #02
+	STA $4014
+	JSR EnableRendering
+	JSR Clockslide_1830
+	; we have about 17 PPU cycles until dot 0 of scanline 0
+	; Let's aim for about dot 310. (310 + 17 = 327. 327/3 = 109 CPU cycles. (-3 more since the read happens after 3 more CPU cycles)
+	JSR Clockslide_40
+	JSR Clockslide_40
+	JSR Clockslide_26	; = 106 cycles of clocksliding.
+	LDA $2004
+	CMP #$FF
+	BNE FAIL_Address2004_Behavior2	; This reads $FF. (I'll need to look into why, but I know this is the case.)
+
 	;; END OF TEST ;;
 	JSR ClearOverscanNametable
 	JSR ClearPage2
@@ -5935,6 +5960,10 @@ TEST_Address2004_Behavior_loop:			; Set up page 2 so every value is essentially 
 	LDA #1
 	RTS
 ;;;;;;;
+
+	
+FAIL_Address2004_Behavior2:
+	JMP FAIL_Address2004
 
 FAIL_APURegActivation_Pre:
 	LDA #1
