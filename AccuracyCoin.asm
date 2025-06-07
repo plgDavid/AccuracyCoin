@@ -8466,7 +8466,7 @@ TEST_DMC_OverflowLoop: ; DMA every 432 CPU cycles.
 	BNE FAIL_DeltaModulationChannel4
 	INC <currentSubTest
 	
-	;;; Test J [APU Delta Modulation Channel]: Check that the DMA will be delayed by 1 CPU cycle if the write to $4015 occurs 2 cycles before the DMA timer reaches 0. ;;;
+	;;; Test L [APU Delta Modulation Channel]: Check that the DMA will be delayed by 1 CPU cycle if the write to $4015 occurs 2 cycles before the DMA timer reaches 0. ;;;
 	; This is blargg's original DMA sync routine.
 	; As I wrote in my notes there, blargg made an off-by-one error that allows for an interesting bug to be seen in emulators.
 	; While blargg's code was supposed to sync the DMC DMA to occur 3 cycles after the write to $4015, it actually occured 2 cycles after the write.
@@ -10062,7 +10062,7 @@ RunTest:
 	STY <Copy_Y2                  ; Store the Y register
 	STX <Copy_X2                  ; Store the X register
 	LDA <RunningAllTests
-	BNE RunTest_AllTestSkipNMI	  ; Since the NMI is already disabled, we don't need to write to $2000 
+	BNE RunTest_AllTestSkipNMI	  ; If we're currently running all tests the NMI is already disabled, so we don't need to write to $2000 
 	JSR DisableNMI	              ; We don't want the NMI occuring during the tests. (and if we do, overwrite the NMI function in RAM before enabling it)
 RunTest_AllTestSkipNMI:
 	LDX <menuCursorYPos           ; X = which test from the current suite we're running
@@ -10129,7 +10129,7 @@ ClearNametableFrom2240:	; Some "tests" just print a bunch of values on screen ar
 	STA $2006
 	LDX #$10
 	LDA #$24
-ClearNTFrom2240Loop:
+ClearNTFrom2240Loop:	; I unrolled this loop to save CPU cycles, since I'd like all of this to happen inside VBlank, with time to spare to write mroe stuff.
 	STA $2007
 	STA $2007
 	STA $2007
@@ -10355,23 +10355,12 @@ SyncTo1000CyclesUntilNMILoop:
 	LDA #0
 	JSR VblSync_Plus_A
 	; We are now on dot 0 of Vblank
-	JSR Clockslide_3000 ;
-	JSR Clockslide_3000 ; 6000
+	JSR Clockslide_6000 ; 6000
 	JSR EnableNMI		; 6031 (wait for vblank to end first)
-	JSR Clockslide_3000 ; 9031
-	JSR Clockslide_3000 ; 12031
-	JSR Clockslide_3000 ; 15031
-	JSR Clockslide_3000 ; 18031
-	JSR Clockslide_3000 ; 21031
-	JSR Clockslide_3000 ; 24031
-	JSR Clockslide_3000 ; 27031
-	JSR Clockslide_500  ; 27531
-	JSR Clockslide_500  ; 28031
-	JSR Clockslide_500  ; 28531
-	JSR Clockslide_100  ; 28631
-	JSR Clockslide_100  ; 28731
-	JSR Clockslide_20   ; 28751
-	JSR Clockslide_21   ; 28772
+	JSR Clockslide_20000; 26031
+	JSR Clockslide_2000 ; 28031
+	JSR Clockslide_700  ; 28731
+	JSR Clockslide_41   ; 28772
 	PLA
 	RTS	;+6
 ;;;;;;;
