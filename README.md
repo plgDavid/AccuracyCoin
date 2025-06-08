@@ -1,5 +1,6 @@
 # AccuracyCoin
-A large collection of NES accuracy tests on a single NROM cartridge.
+A large collection of NES accuracy tests on a single NROM cartridge. 
+(CHR-RAM version tweaked by plgDavid)
 
 This ROM was designed for the RP2A03G CPU, and the RP2C02G PPU. Some tests might fail on hardware with a different revision.
 
