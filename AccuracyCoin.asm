@@ -16,7 +16,7 @@
 	
 	;;;; HEADER AND COMPILER STUFF ;;;;
 	.inesprg 2  ; 2 banks
-	.ineschr 1  ; 
+	.ineschr 0  ; chr-ram!
 	.inesmap 0  ; mapper 0 = NROM
 	.inesmir 1  ; background mirroring, vertical
 	;;;; CONSTANTS ;;;;	
@@ -86,6 +86,7 @@ PrintDecimalTensCheck = $39
 result_VblankSync_PreTest = $3A
 DebugMode = $3B
 
+CHRRAM_TEMP = $40
 
 PostDMACyclesUntilTestInstruction = 14
 
@@ -265,6 +266,10 @@ result_PowOn_PPUReset = $0484
 ;$600 is dedicated to the IRQ routine
 ;$700 is dedicated to the NMI routine.
 
+PPUMASK = $2001
+PPUADDR = $2006
+PPUDATA = $2007
+
 	;;;; ASSEMBLY CODE ;;;;
 	.org $8000
 	; The open bus test needs to make sure an inaccurate emulation of open bus will fall into test code, so this function here is a fail condition of the open bus test.
@@ -315,7 +320,11 @@ VblLoop:
 	; Now that the PPU is responsive, let's copy the resting values.
 	JSR Read32NametableBytes
 	JSR ReadPaletteRAM
-	
+
+;IFDEF CHRRAM	
+	JSR UploadCHRRAM
+;ENDIF
+
 	; Let's also see if the magic number was written, to verify if the reset flag exists.
 	; It's worth noting that in its current state, this test fails on my console.
 	LDA #$6
@@ -923,8 +932,7 @@ PressStartToContinue:
 PressStartToContinue_End:
 	RTI
 	
-	.bank 1
-	.org $A000
+
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;                 TESTS                   ;;
@@ -1419,6 +1427,7 @@ TEST_DummyWritesPrepLoop:
 	LDY <$FE
 	RTS
 ;;;;;;;
+
 
 TEST_FailPPUOpenBus:
 	JSR ResetScroll
@@ -3810,6 +3819,42 @@ TEST_SHY_9C:
 	RTS
 ;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	.bank 1
+	.org $A000
+CHRRAMBIN:
+	.incbin "chr.bin"
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	.bank 2	; If I don't do this, the ROM won't compile.
+	.org $C000
+	
+	; and 33 00s in a row for a nice and neat silent DPCM sample.
+	.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+
+;routine from NESDEV
+UploadCHRRAM:
+	LDA #CHRRAMBIN & $FF ; load the source address into a pointer in zero page
+	STA CHRRAM_TEMP
+	LDA #CHRRAMBIN >> 8
+	STA CHRRAM_TEMP+1
+
+	LDY #0       ; starting index into the first page
+	STY PPUMASK  ; turn off rendering just in case
+	STY PPUADDR  ; load the destination address into the PPU
+	STY PPUADDR
+	LDX #32      ; number of 256-byte pages to copy
+chrloop:
+	LDA [CHRRAM_TEMP],y  ; copy one byte
+	STA PPUDATA
+	INY
+	BNE chrloop  ; repeat until we finish the page
+	INC CHRRAM_TEMP+1  ; go to the next page
+	DEX
+	BNE chrloop  ; repeat until we've copied enough pages
+	RTS
+	
+
 TEST_SHX_9E:
 	LDA #PostDMACyclesUntilTestInstruction+4
 	STA <Test_UnOp_CycleDelayPostDMA
@@ -4016,6 +4061,8 @@ TEST_ANE_8B:
 	RTS
 ;;;;;;;
 
+
+
 TEST_LXA_AB:
 	LDA #$AB
 	JSR TEST_UnOp_Setup ; Set the opcode
@@ -4100,7 +4147,6 @@ TEST_SBC_EB:
 	LDA #1
 	RTS
 ;;;;;;;
-
 TEST_MAGIC:
 	; The ANE and LXA instructions have "magic values".
 	; The value is typically $EE or $FF.
@@ -6521,12 +6567,6 @@ TEST_ControllerStrobing:
 	RTS
 ;;;;;;;
 
-	.bank 2	; If I don't do this, the ROM won't compile.
-	.org $C000
-	
-	; and 33 00s in a row for a nice and neat silent DPCM sample.
-	.byte $00,  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-
 FAIL_InstructionTiming:
 	JMP TEST_Fail
 
@@ -7658,7 +7698,8 @@ TEST_APULengthTable_UpdateCounterLoop:
 ;;;;;;;
 	
 TEST_APULengthTable_AnswerKey:
-	.byte 10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
+	.byte 10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14
+    .byte 12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
 
 FAIL_FrameCounterIRQ:
 	LDA #$40
@@ -11251,5 +11292,6 @@ TEST_FFFF_Branch_Wraparound:
 
 	;;;; MORE COMPILER STUFF, ADDING THE PATTERN DATA ;;;;
 
-	.incchr "Sprites.pcx"
-	.incchr "Tiles.pcx"
+;	.incbin "chr.bin"
+;	.incchr "Sprites.pcx"
+;	.incchr "Tiles.pcx"
